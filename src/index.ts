@@ -63,6 +63,10 @@ export type {
 export { encodeSellerScriptPubKey } from './address.js';
 export type { SellerAddressKind, SellerScriptPubKey } from './address.js';
 
+// ---------- Asset-transfer wrapper ----------
+export { splitAssetWrappedScriptPubKey } from './asset-wrapper.js';
+export type { AssetTransferPayload, SplitAssetWrappedResult } from './asset-wrapper.js';
+
 // ---------- Covenants ----------
 export {
   // Legacy (ECDSA cancel)

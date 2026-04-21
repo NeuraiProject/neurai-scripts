@@ -6,4 +6,6 @@ export { encodeP2PKHScriptPubKey, encodeP2WPKHScriptPubKey, encodeP2WSHScriptPub
 export type { AuthType, AuthScriptWitnessLegacyInput, AuthScriptWitnessPQInput, AuthScriptWitnessNoAuthInput, AuthScriptWitnessRefInput, EncodeNullDataOptions, MultisigParams } from './standard/index.js';
 export { encodeSellerScriptPubKey } from './address.js';
 export type { SellerAddressKind, SellerScriptPubKey } from './address.js';
+export { splitAssetWrappedScriptPubKey } from './asset-wrapper.js';
+export type { AssetTransferPayload, SplitAssetWrappedResult } from './asset-wrapper.js';
 export { buildPartialFillScript, buildPartialFillScriptHex, buildFillScriptSig, buildFillScriptSigHex, buildCancelScriptSig, buildCancelScriptSigHex, parsePartialFillScript, buildPartialFillScriptPQ, buildPartialFillScriptPQHex, buildCancelScriptSigPQ, buildCancelScriptSigPQHex, parsePartialFillScriptPQ, isPartialFillScriptPQ, DEFAULT_PQ_TXHASH_SELECTOR } from './covenants/index.js';

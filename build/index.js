@@ -6,6 +6,8 @@ export * as opcodes from './core/opcodes.js';
 export { encodeP2PKHScriptPubKey, encodeP2WPKHScriptPubKey, encodeP2WSHScriptPubKey, encodeAuthScriptScriptPubKey, buildAuthScriptWitnessLegacy, buildAuthScriptWitnessPQ, buildAuthScriptWitnessNoAuth, buildAuthScriptWitnessRef, AUTHSCRIPT_NOAUTH, AUTHSCRIPT_PQ, AUTHSCRIPT_LEGACY, AUTHSCRIPT_REF, encodeNullDataScript, NULLDATA_STANDARD_MAX_SIZE, encodeMultisigRedeemScript, encodeMultisigRedeemScriptHex, encodeP2SHScriptPubKey, MULTISIG_MAX_PUBKEYS } from './standard/index.js';
 // ---------- Address helpers (thin wrapper around standard/*) ----------
 export { encodeSellerScriptPubKey } from './address.js';
+// ---------- Asset-transfer wrapper ----------
+export { splitAssetWrappedScriptPubKey } from './asset-wrapper.js';
 // ---------- Covenants ----------
 export { 
 // Legacy (ECDSA cancel)
