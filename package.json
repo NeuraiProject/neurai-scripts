@@ -1,6 +1,6 @@
 {
   "name": "@neuraiproject/neurai-scripts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Script-assembly library for Neurai: opcode constants, ScriptBuilder, standard scripts (P2PKH, P2WPKH, P2WSH, AuthScript, multisig, OP_RETURN) and covenants (partial-fill sell orders, legacy + PQ) targeting the DePIN-Test opcode set",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -29,6 +29,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && rollup -c rollup.config.mjs",
     "build:ts": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build",
     "test": "npm run build && vitest run",
     "test:run": "vitest run",
     "test:watch": "vitest"
