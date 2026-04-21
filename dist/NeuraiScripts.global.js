@@ -1966,12 +1966,19 @@ var NeuraiScriptsBundle = (function (exports) {
         // ───────── Cancel branch (PQ via OP_CHECKSIGFROMSTACK) ─────────
         // scriptSig expected: <sigPQ> <pubKeyPQ> OP_1
         // After OP_IF consumes the flag: [ sig, pubKey ]
+        //
+        // The selector MUST be pushed as a raw 1-byte element — consensus
+        // (`interpreter.cpp` OP_TXHASH case) rejects any stack item of
+        // size ≠ 1. Using `pushInt(selector)` would work for 1..127 but emit a
+        // 2-byte CScriptNum for 0x80..0xff (the sign-disambiguation pad), which
+        // makes OP_TXHASH fail with SCRIPT_ERR_TXHASH. See
+        // `memory/project_covenant_v3_findings.md` bug B for details.
         b.op(OP_IF)
             .op(OP_DUP) // [ sig, pubKey, pubKey ]
             .op(OP_SHA256) // [ sig, pubKey, H(pubKey) ]
             .pushBytes(pubKeyCommitment) // [ sig, pubKey, H(pubKey), commitment ]
             .op(OP_EQUALVERIFY) // [ sig, pubKey ]
-            .pushInt(txHashSelector) // [ sig, pubKey, selector ]
+            .pushBytes(Uint8Array.of(txHashSelector)) // [ sig, pubKey, selector ] — always 1-byte stack item
             .op(OP_TXHASH) // [ sig, pubKey, txHash ]
             .op(OP_SWAP) // [ sig, txHash, pubKey ]
             .op(OP_CHECKSIGFROMSTACK) // [ 1 | 0 ]
@@ -2266,6 +2273,33 @@ var NeuraiScriptsBundle = (function (exports) {
         const data = readPush(c, label);
         return decodeScriptNum(data, label);
     }
+    /**
+     * Read a 1-byte selector as an UNSIGNED 8-bit integer (0..255). Accepts
+     * two on-wire encodings, because old vs new covenant builders differ:
+     *   - `OP_1..OP_16` shorthand (single opcode) → values 1..16.
+     *   - `0x01 <byte>` raw 1-byte push → any value 1..255.
+     *
+     * Values 0x80..0xff MUST use the raw-push form; the CScriptNum encoding
+     * would need a 0x00 padding byte and become 2 bytes on-stack, which
+     * consensus `OP_TXHASH` rejects. The builder in `script-pq.ts` emits the
+     * raw-push form unconditionally; the parser stays lenient so covenants
+     * built by older tools (using OP_N for small values) still round-trip.
+     */
+    function readPushUint8(c, label) {
+        if (c.pos >= c.bytes.length) {
+            throw new Error(`parse: end of script at ${label}`);
+        }
+        const opcode = c.bytes[c.pos];
+        if (opcode >= OP_1 && opcode <= 0x60) {
+            c.pos += 1;
+            return opcode - OP_1 + 1;
+        }
+        const data = readPush(c, label);
+        if (data.length !== 1) {
+            throw new Error(`parse: ${label} must be a single-byte push, got ${data.length} bytes`);
+        }
+        return data[0];
+    }
 
     /**
      * Parser for the Partial-Fill Sell Order covenant.
@@ -2399,11 +2433,13 @@ var NeuraiScriptsBundle = (function (exports) {
             throw new Error(`parse-pq: pubKeyCommitment must be 32 bytes, got ${pubKeyCommitment.length}`);
         }
         expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (cancel)');
-        const txHashSelectorBig = readPushPositiveInt(c, 'txHashSelector');
-        if (txHashSelectorBig < 1n || txHashSelectorBig > 0xffn) {
-            throw new Error(`parse-pq: txHashSelector out of range (${txHashSelectorBig})`);
+        // Selector is read as an unsigned byte — consensus OP_TXHASH treats the
+        // on-stack element as uint8, and the builder emits a raw 1-byte push so
+        // selectors 0x80..0xff round-trip correctly (plan v3 bug B).
+        const txHashSelector = readPushUint8(c, 'txHashSelector');
+        if (txHashSelector < 1) {
+            throw new Error(`parse-pq: txHashSelector 0x00 is rejected by OP_TXHASH`);
         }
-        const txHashSelector = Number(txHashSelectorBig);
         expectByte(c, OP_TXHASH, 'OP_TXHASH');
         expectByte(c, OP_SWAP, 'OP_SWAP');
         expectByte(c, OP_CHECKSIGFROMSTACK, 'OP_CHECKSIGFROMSTACK');

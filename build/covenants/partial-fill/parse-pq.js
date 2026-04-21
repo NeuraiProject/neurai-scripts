@@ -6,7 +6,7 @@
  */
 import { bytesEqual, bytesToHex, hexToBytes } from '../../core/bytes.js';
 import { OP_0, OP_1, OP_2, OP_3, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY } from '../../core/opcodes.js';
-import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt } from '../../core/script-parser.js';
+import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt, readPushUint8 } from '../../core/script-parser.js';
 /** Quick discriminator without throwing — useful for indexers. */
 export function isPartialFillScriptPQ(script) {
     const bytes = typeof script === 'string' ? hexToBytes(script) : script;
@@ -32,11 +32,13 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
         throw new Error(`parse-pq: pubKeyCommitment must be 32 bytes, got ${pubKeyCommitment.length}`);
     }
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (cancel)');
-    const txHashSelectorBig = readPushPositiveInt(c, 'txHashSelector');
-    if (txHashSelectorBig < 1n || txHashSelectorBig > 0xffn) {
-        throw new Error(`parse-pq: txHashSelector out of range (${txHashSelectorBig})`);
+    // Selector is read as an unsigned byte — consensus OP_TXHASH treats the
+    // on-stack element as uint8, and the builder emits a raw 1-byte push so
+    // selectors 0x80..0xff round-trip correctly (plan v3 bug B).
+    const txHashSelector = readPushUint8(c, 'txHashSelector');
+    if (txHashSelector < 1) {
+        throw new Error(`parse-pq: txHashSelector 0x00 is rejected by OP_TXHASH`);
     }
-    const txHashSelector = Number(txHashSelectorBig);
     expectByte(c, OP_TXHASH, 'OP_TXHASH');
     expectByte(c, OP_SWAP, 'OP_SWAP');
     expectByte(c, OP_CHECKSIGFROMSTACK, 'OP_CHECKSIGFROMSTACK');

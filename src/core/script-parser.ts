@@ -142,3 +142,33 @@ export function readPushPositiveInt(c: Cursor, label: string): bigint {
   const data = readPush(c, label);
   return decodeScriptNum(data, label);
 }
+
+/**
+ * Read a 1-byte selector as an UNSIGNED 8-bit integer (0..255). Accepts
+ * two on-wire encodings, because old vs new covenant builders differ:
+ *   - `OP_1..OP_16` shorthand (single opcode) → values 1..16.
+ *   - `0x01 <byte>` raw 1-byte push → any value 1..255.
+ *
+ * Values 0x80..0xff MUST use the raw-push form; the CScriptNum encoding
+ * would need a 0x00 padding byte and become 2 bytes on-stack, which
+ * consensus `OP_TXHASH` rejects. The builder in `script-pq.ts` emits the
+ * raw-push form unconditionally; the parser stays lenient so covenants
+ * built by older tools (using OP_N for small values) still round-trip.
+ */
+export function readPushUint8(c: Cursor, label: string): number {
+  if (c.pos >= c.bytes.length) {
+    throw new Error(`parse: end of script at ${label}`);
+  }
+  const opcode = c.bytes[c.pos];
+  if (opcode >= OP_1 && opcode <= 0x60) {
+    c.pos += 1;
+    return opcode - OP_1 + 1;
+  }
+  const data = readPush(c, label);
+  if (data.length !== 1) {
+    throw new Error(
+      `parse: ${label} must be a single-byte push, got ${data.length} bytes`
+    );
+  }
+  return data[0];
+}

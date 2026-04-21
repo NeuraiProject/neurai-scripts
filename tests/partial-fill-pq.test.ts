@@ -35,20 +35,48 @@ describe('buildPartialFillScriptPQ', () => {
     expect(hex.startsWith('63' + '76' + 'a8' + '20' + 'cc'.repeat(32))).toBe(true);
   });
 
-  it('embeds the default selector 0xff via direct push', () => {
+  it('embeds the default selector 0xff via a raw 1-byte push', () => {
     const hex = buildPartialFillScriptPQHex(baseParams);
-    // After the commitment EQUALVERIFY, builder emits `pushInt(0xff)`.
-    // CScriptNum(0xff) = [0xff, 0x00] → push bytes are `02 ff 00`.
-    expect(hex).toContain('8802ff00b5');
-    //                     88         EQUALVERIFY on commitment
-    //                       02ff00   pushInt(0xff)
-    //                             b5 OP_TXHASH
+    // After the commitment EQUALVERIFY, builder emits a raw 1-byte push
+    // `01 <selector>` so OP_TXHASH sees a single-byte stack item. Using
+    // `pushInt(0xff)` would emit `02 ff 00` (CScriptNum + 0x00 pad) which
+    // consensus rejects with SCRIPT_ERR_TXHASH (plan v3 bug B).
+    expect(hex).toContain('8801ffb5');
+    //                     88        EQUALVERIFY on commitment
+    //                       01ff    raw 1-byte push of 0xff
+    //                           b5  OP_TXHASH
   });
 
-  it('honours a custom selector byte', () => {
+  it('honours a custom selector byte in the 1..127 range', () => {
     const hex = buildPartialFillScriptPQHex({ ...baseParams, txHashSelector: 0x3f });
-    // pushInt(0x3f): 0x3f < 0x80, encoded as `01 3f`.
     expect(hex).toContain('88013fb5');
+  });
+
+  it('handles selector 0x80 (high bit set) — was broken by pushInt before v0.3.0', () => {
+    const hex = buildPartialFillScriptPQHex({ ...baseParams, txHashSelector: 0x80 });
+    // Must emit `01 80` — NOT `02 80 00` — so OP_TXHASH gets a 1-byte item.
+    expect(hex).toContain('880180b5');
+  });
+
+  it('round-trips selector 0xff through parser (regression for v3 bug B)', () => {
+    const hex = buildPartialFillScriptPQHex({ ...baseParams, txHashSelector: 0xff });
+    expect(parsePartialFillScriptPQ(hex).txHashSelector).toBe(0xff);
+  });
+
+  it('round-trips selector 0x80 through parser', () => {
+    const hex = buildPartialFillScriptPQHex({ ...baseParams, txHashSelector: 0x80 });
+    expect(parsePartialFillScriptPQ(hex).txHashSelector).toBe(0x80);
+  });
+
+  it('parser accepts legacy OP_N shorthand for selectors 1..16 (backwards compat)', () => {
+    // Hand-build the cancel branch preamble with OP_1 (single opcode 0x51)
+    // instead of the new raw 1-byte push. Older on-chain covenants used
+    // this form — the parser must keep accepting it.
+    const hex = buildPartialFillScriptPQHex({ ...baseParams, txHashSelector: 0x01 });
+    // Builder now emits `01 01`; patch to OP_1 (0x51) to simulate old form.
+    const patched = hex.replace('880101b5', '8851b5');
+    expect(patched).not.toBe(hex);
+    expect(parsePartialFillScriptPQ(patched).txHashSelector).toBe(1);
   });
 
   it('ends the cancel branch with SWAP CHECKSIGFROMSTACK ELSE', () => {

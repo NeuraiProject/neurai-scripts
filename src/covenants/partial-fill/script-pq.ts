@@ -120,15 +120,22 @@ export function buildPartialFillScriptPQ(params: PartialFillOrderPQParams): Uint
   // ───────── Cancel branch (PQ via OP_CHECKSIGFROMSTACK) ─────────
   // scriptSig expected: <sigPQ> <pubKeyPQ> OP_1
   // After OP_IF consumes the flag: [ sig, pubKey ]
+  //
+  // The selector MUST be pushed as a raw 1-byte element — consensus
+  // (`interpreter.cpp` OP_TXHASH case) rejects any stack item of
+  // size ≠ 1. Using `pushInt(selector)` would work for 1..127 but emit a
+  // 2-byte CScriptNum for 0x80..0xff (the sign-disambiguation pad), which
+  // makes OP_TXHASH fail with SCRIPT_ERR_TXHASH. See
+  // `memory/project_covenant_v3_findings.md` bug B for details.
   b.op(OP_IF)
-    .op(OP_DUP)                       // [ sig, pubKey, pubKey ]
-    .op(OP_SHA256)                    // [ sig, pubKey, H(pubKey) ]
-    .pushBytes(pubKeyCommitment)      // [ sig, pubKey, H(pubKey), commitment ]
-    .op(OP_EQUALVERIFY)               // [ sig, pubKey ]
-    .pushInt(txHashSelector)          // [ sig, pubKey, selector ]
-    .op(OP_TXHASH)                    // [ sig, pubKey, txHash ]
-    .op(OP_SWAP)                      // [ sig, txHash, pubKey ]
-    .op(OP_CHECKSIGFROMSTACK)         // [ 1 | 0 ]
+    .op(OP_DUP)                                 // [ sig, pubKey, pubKey ]
+    .op(OP_SHA256)                              // [ sig, pubKey, H(pubKey) ]
+    .pushBytes(pubKeyCommitment)                // [ sig, pubKey, H(pubKey), commitment ]
+    .op(OP_EQUALVERIFY)                         // [ sig, pubKey ]
+    .pushBytes(Uint8Array.of(txHashSelector))   // [ sig, pubKey, selector ] — always 1-byte stack item
+    .op(OP_TXHASH)                              // [ sig, pubKey, txHash ]
+    .op(OP_SWAP)                                // [ sig, txHash, pubKey ]
+    .op(OP_CHECKSIGFROMSTACK)                   // [ 1 | 0 ]
     .op(OP_ELSE);
 
   // ───────── Partial-fill branch (identical layout to legacy) ─────────

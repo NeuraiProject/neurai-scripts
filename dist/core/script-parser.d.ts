@@ -33,3 +33,16 @@ export declare function decodeScriptNum(data: Uint8Array, label: string): bigint
  * only for values that are strictly positive (prices, selectors, indices).
  */
 export declare function readPushPositiveInt(c: Cursor, label: string): bigint;
+/**
+ * Read a 1-byte selector as an UNSIGNED 8-bit integer (0..255). Accepts
+ * two on-wire encodings, because old vs new covenant builders differ:
+ *   - `OP_1..OP_16` shorthand (single opcode) → values 1..16.
+ *   - `0x01 <byte>` raw 1-byte push → any value 1..255.
+ *
+ * Values 0x80..0xff MUST use the raw-push form; the CScriptNum encoding
+ * would need a 0x00 padding byte and become 2 bytes on-stack, which
+ * consensus `OP_TXHASH` rejects. The builder in `script-pq.ts` emits the
+ * raw-push form unconditionally; the parser stays lenient so covenants
+ * built by older tools (using OP_N for small values) still round-trip.
+ */
+export declare function readPushUint8(c: Cursor, label: string): number;
