@@ -1,0 +1,69 @@
+{
+  "name": "@neuraiproject/neurai-scripts",
+  "version": "0.1.0",
+  "description": "Script-assembly library for Neurai: opcode constants, ScriptBuilder, standard scripts (P2PKH, P2WPKH, P2WSH, AuthScript, multisig, OP_RETURN) and covenants (partial-fill sell orders, legacy + PQ) targeting the DePIN-Test opcode set",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "browser": "./dist/browser.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./browser": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./global": "./dist/NeuraiScripts.global.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && rollup -c rollup.config.mjs",
+    "build:ts": "tsc -p tsconfig.json",
+    "test": "npm run build && vitest run",
+    "test:run": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@neuraiproject/neurai-create-transaction": "^0.2.0"
+  },
+  "keywords": [
+    "neurai",
+    "scripts",
+    "script",
+    "scriptbuilder",
+    "opcodes",
+    "depin-test",
+    "p2pkh",
+    "p2wpkh",
+    "p2wsh",
+    "authscript",
+    "multisig",
+    "nulldata",
+    "op-return",
+    "covenant",
+    "partial-fill",
+    "post-quantum",
+    "ml-dsa-44",
+    "dex"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.8",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "bech32": "^2.0.0",
+    "bs58check": "^4.0.0",
+    "rollup": "^4.52.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
