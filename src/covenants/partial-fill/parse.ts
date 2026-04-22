@@ -28,6 +28,7 @@ import {
   OP_INPUTASSETFIELD,
   OP_MUL,
   OP_OUTPUTASSETFIELD,
+  OP_OUTPUTAUTHCOMMITMENT,
   OP_OUTPUTSCRIPT,
   OP_OUTPUTVALUE,
   OP_OVER,
@@ -35,7 +36,7 @@ import {
   OP_SWAP,
   OP_TXFIELD,
   OP_VERIFY,
-  TXFIELD_SCRIPTPUBKEY
+  TXFIELD_AUTHSCRIPT_COMMITMENT
 } from '../../core/opcodes.js';
 import {
   assertTrailing,
@@ -108,13 +109,13 @@ export function parsePartialFillScript(
   const tokenIdBytes1 = readPush(c, 'tokenId #1');
   expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name)');
 
-  // ───── Remainder continuity: same scriptPubKey ─────
+  // ───── Remainder continuity: same AuthScript commitment (NIP-023) ─────
   expectByte(c, OP_2, 'OP_2 (remainder idx)');
-  expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (remainder)');
-  expectByte(c, OP_3, 'OP_3 (TXFIELD selector)');
-  if (TXFIELD_SCRIPTPUBKEY !== 0x03) throw new Error('unexpected TXFIELD selector constant');
+  expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
+  expectByte(c, OP_2, 'OP_2 (TXFIELD selector: AUTHSCRIPT_COMMITMENT)');
+  if (TXFIELD_AUTHSCRIPT_COMMITMENT !== 0x02) throw new Error('unexpected TXFIELD selector constant');
   expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
-  expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder spk)');
+  expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
 
   // ───── Remainder tokenId check ─────
   expectByte(c, OP_2, 'OP_2 (remainder idx)');

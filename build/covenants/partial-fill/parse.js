@@ -8,7 +8,7 @@
  * "partial-fill order" or "unknown script" with no false positives.
  */
 import { bytesEqual, bytesToHex, hexToBytes } from '../../core/bytes.js';
-import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_0, OP_1, OP_2, OP_3, OP_CHECKSIG, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_HASH160, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SUB, OP_SWAP, OP_TXFIELD, OP_VERIFY, TXFIELD_SCRIPTPUBKEY } from '../../core/opcodes.js';
+import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_0, OP_1, OP_2, OP_CHECKSIG, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_HASH160, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SUB, OP_SWAP, OP_TXFIELD, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
 import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt } from '../../core/script-parser.js';
 /**
  * Parse a covenant scriptPubKey and extract its parameters. Throws with a
@@ -65,14 +65,14 @@ export function parsePartialFillScript(script, network = 'xna-test') {
     expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name)');
     const tokenIdBytes1 = readPush(c, 'tokenId #1');
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name)');
-    // ───── Remainder continuity: same scriptPubKey ─────
+    // ───── Remainder continuity: same AuthScript commitment (NIP-023) ─────
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
-    expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (remainder)');
-    expectByte(c, OP_3, 'OP_3 (TXFIELD selector)');
-    if (TXFIELD_SCRIPTPUBKEY !== 0x03)
+    expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
+    expectByte(c, OP_2, 'OP_2 (TXFIELD selector: AUTHSCRIPT_COMMITMENT)');
+    if (TXFIELD_AUTHSCRIPT_COMMITMENT !== 0x02)
         throw new Error('unexpected TXFIELD selector constant');
     expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
-    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder spk)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
     // ───── Remainder tokenId check ─────
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
     expectByte(c, OP_1, 'OP_1 (NAME selector)');

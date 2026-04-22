@@ -24,7 +24,7 @@
  */
 import { bytesToHex } from '../../core/bytes.js';
 import { encodeSellerScriptPubKey } from '../../address.js';
-import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_SCRIPTPUBKEY } from '../../core/opcodes.js';
+import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
 const ASSET_NAME_MAX = 32;
 export const DEFAULT_PQ_TXHASH_SELECTOR = 0xff;
@@ -124,10 +124,12 @@ export function buildPartialFillScriptPQ(params) {
         .op(OP_OUTPUTASSETFIELD)
         .pushBytes(tokenIdBytes)
         .op(OP_EQUALVERIFY);
-    // 5. Remainder continuity (output 2) — same scriptPubKey as spent
+    // 5. Remainder continuity (output 2) — same AuthScript commitment as spent
+    //    (NIP-023; see script.ts for why full-spk equality is unsatisfiable on
+    //    asset-wrapped covenant UTXOs).
     b.pushInt(2)
-        .op(OP_OUTPUTSCRIPT)
-        .pushInt(TXFIELD_SCRIPTPUBKEY)
+        .op(OP_OUTPUTAUTHCOMMITMENT)
+        .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
         .op(OP_TXFIELD)
         .op(OP_EQUALVERIFY);
     // 6. Remainder tokenId

@@ -121,6 +121,7 @@ export declare const OP_XNA_ASSET = 192;
 export declare const OP_REFINPUTFIELD = 210;
 export declare const OP_REFINPUTASSETFIELD = 211;
 export declare const OP_REFINPUTCOUNT = 212;
+export declare const OP_OUTPUTAUTHCOMMITMENT = 213;
 export declare const OP_CAT = 126;
 export declare const OP_SPLIT = 183;
 export declare const OP_REVERSEBYTES = 188;

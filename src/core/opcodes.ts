@@ -160,6 +160,12 @@ export const OP_REFINPUTFIELD = 0xd2;
 export const OP_REFINPUTASSETFIELD = 0xd3;
 export const OP_REFINPUTCOUNT = 0xd4;
 
+// ---------- Output auth commitment introspection (NIP-023) ----------
+// Pushes the 32-byte AuthScript v1 commitment of a selected output's
+// scriptPubKey. Symmetric to TXFIELD_AUTHSCRIPT_COMMITMENT for inputs;
+// ignores any trailing OP_XNA_ASSET asset wrapper bytes.
+export const OP_OUTPUTAUTHCOMMITMENT = 0xd5;
+
 // ---------- Byte manipulation (DePIN-Test) ----------
 export const OP_CAT = 0x7e;
 export const OP_SPLIT = 0xb7;

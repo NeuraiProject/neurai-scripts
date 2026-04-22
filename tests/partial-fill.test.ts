@@ -35,7 +35,7 @@ const baseParams: PartialFillOrderParams = {
  *     <0> OUTPUTSCRIPT <25B P2PKH(PKH)> EQUALVERIFY
  *     DUP <1> <2> OUTPUTASSETFIELD EQUALVERIFY
  *     <1> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
- *     <2> OUTPUTSCRIPT <3> TXFIELD EQUALVERIFY
+ *     <2> OUTPUTAUTHCOMMITMENT <2> TXFIELD EQUALVERIFY  (NIP-023)
  *     <2> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
  *     <2> <2> OUTPUTASSETFIELD OVER <0> <2> INPUTASSETFIELD SWAP SUB EQUALVERIFY
  *     DROP <1>
@@ -55,7 +55,7 @@ const EXPECTED_SCRIPT_HEX =
   '88' +                                                               // EQUALVERIFY
   '76' + '51' + '52' + 'ce' + '88' +                                   // DUP 1 2 OUTPUTASSETFIELD EQUALVERIFY
   '51' + '51' + 'ce' + '03434154' + '88' +                             // 1 1 OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
-  '52' + 'cd' + '53' + 'b6' + '88' +                                   // 2 OUTPUTSCRIPT 3 TXFIELD EQUALVERIFY
+  '52' + 'd5' + '52' + 'b6' + '88' +                                   // 2 OUTPUTAUTHCOMMITMENT 2 TXFIELD EQUALVERIFY (NIP-023)
   '52' + '51' + 'ce' + '03434154' + '88' +                             // 2 1 OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
   '52' + '52' + 'ce' + '78' + '00' + '52' + 'cf' + '7c' + '94' + '88' +
   '75' + '51' +                                                        // DROP 1

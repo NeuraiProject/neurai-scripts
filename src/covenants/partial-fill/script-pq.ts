@@ -39,6 +39,7 @@ import {
   OP_INPUTASSETFIELD,
   OP_MUL,
   OP_OUTPUTASSETFIELD,
+  OP_OUTPUTAUTHCOMMITMENT,
   OP_OUTPUTSCRIPT,
   OP_OUTPUTVALUE,
   OP_OVER,
@@ -48,7 +49,7 @@ import {
   OP_TXFIELD,
   OP_TXHASH,
   OP_VERIFY,
-  TXFIELD_SCRIPTPUBKEY
+  TXFIELD_AUTHSCRIPT_COMMITMENT
 } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
 import type { PartialFillOrderPQParams } from '../../types.js';
@@ -172,10 +173,12 @@ export function buildPartialFillScriptPQ(params: PartialFillOrderPQParams): Uint
     .pushBytes(tokenIdBytes)
     .op(OP_EQUALVERIFY);
 
-  // 5. Remainder continuity (output 2) — same scriptPubKey as spent
+  // 5. Remainder continuity (output 2) — same AuthScript commitment as spent
+  //    (NIP-023; see script.ts for why full-spk equality is unsatisfiable on
+  //    asset-wrapped covenant UTXOs).
   b.pushInt(2)
-    .op(OP_OUTPUTSCRIPT)
-    .pushInt(TXFIELD_SCRIPTPUBKEY)
+    .op(OP_OUTPUTAUTHCOMMITMENT)
+    .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
     .op(OP_TXFIELD)
     .op(OP_EQUALVERIFY);
 

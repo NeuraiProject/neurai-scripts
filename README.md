@@ -292,9 +292,13 @@ custodial DEX, no off-chain matching, no second signature from the
 seller.
 
 The covenant is **stateful via UTXO continuity**. The output at `vout[2]`
-of every fill must carry the same `scriptPubKey` as the input being
-spent (enforced on the fly by `OP_OUTPUTSCRIPT == OP_TXFIELD 0x03`), so
-the covenant self-replicates without hardcoding its own hash. The
+of every fill must carry the same AuthScript v1 commitment as the input
+being spent (enforced on the fly by
+`OP_OUTPUTAUTHCOMMITMENT == OP_TXFIELD 0x02`, NIP-023), so the covenant
+self-replicates without hardcoding its own hash. Earlier drafts compared
+full scriptPubKeys via `OP_OUTPUTSCRIPT`, but that is unsatisfiable on
+asset-wrapped covenant UTXOs because the remainder's asset wrapper
+encodes a different `amountRaw` than the spent UTXO's. The
 remaining asset quantity is read directly from the input via
 `OP_INPUTASSETFIELD` and the subtraction `inputAmount − N` is verified,
 so the same script works for any remainder as the lot drains. Asset
@@ -402,7 +406,7 @@ OP_ELSE
   <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY                // payment dest
   OP_DUP <1> <0x02> OP_OUTPUTASSETFIELD OP_EQUALVERIFY            // buyer amount == N
   <1> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY         // buyer name == tokenId
-  <2> OP_OUTPUTSCRIPT <0x03> OP_TXFIELD OP_EQUALVERIFY            // continuity
+  <2> OP_OUTPUTAUTHCOMMITMENT <0x02> OP_TXFIELD OP_EQUALVERIFY    // continuity (NIP-023)
   <2> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY         // remainder name
   <2> <0x02> OP_OUTPUTASSETFIELD OP_OVER
       <0> <0x02> OP_INPUTASSETFIELD OP_SWAP OP_SUB OP_EQUALVERIFY // remainder = in - N

@@ -189,6 +189,11 @@ const OP_XNA_ASSET = 0xc0;
 const OP_REFINPUTFIELD = 0xd2;
 const OP_REFINPUTASSETFIELD = 0xd3;
 const OP_REFINPUTCOUNT = 0xd4;
+// ---------- Output auth commitment introspection (NIP-023) ----------
+// Pushes the 32-byte AuthScript v1 commitment of a selected output's
+// scriptPubKey. Symmetric to TXFIELD_AUTHSCRIPT_COMMITMENT for inputs;
+// ignores any trailing OP_XNA_ASSET asset wrapper bytes.
+const OP_OUTPUTAUTHCOMMITMENT = 0xd5;
 // ---------- Byte manipulation (DePIN-Test) ----------
 const OP_CAT = 0x7e;
 const OP_SPLIT = 0xb7;
@@ -311,6 +316,7 @@ var opcodes = /*#__PURE__*/Object.freeze({
     OP_NUMEQUALVERIFY: OP_NUMEQUALVERIFY,
     OP_NUMNOTEQUAL: OP_NUMNOTEQUAL,
     OP_OUTPUTASSETFIELD: OP_OUTPUTASSETFIELD,
+    OP_OUTPUTAUTHCOMMITMENT: OP_OUTPUTAUTHCOMMITMENT,
     OP_OUTPUTCOUNT: OP_OUTPUTCOUNT,
     OP_OUTPUTSCRIPT: OP_OUTPUTSCRIPT,
     OP_OUTPUTVALUE: OP_OUTPUTVALUE,
@@ -1754,12 +1760,16 @@ function splitAssetWrappedScriptPubKey(spkHex) {
  *
  *   output[0] = XNA payment to seller   (value >= N * unitPriceSats)
  *   output[1] = asset to buyer          (tokenId, amount == N)
- *   output[2] = covenant remainder      (same scriptPubKey, amount == in - N)
+ *   output[2] = covenant remainder      (same AuthScript commitment, amount == in - N)
  *   output[3+] = optional buyer change  (not constrained by the covenant)
  *
- * The remainder UTXO reuses the spent scriptPubKey via
- * `OP_OUTPUTSCRIPT == OP_TXFIELD 0x03`, so the covenant is self-replicating
- * without hardcoding its own hash.
+ * The remainder UTXO reuses the spent covenant's AuthScript v1 commitment
+ * via `OP_OUTPUTAUTHCOMMITMENT(2) == OP_TXFIELD(0x02)` (NIP-023). Comparing
+ * commitments rather than full scriptPubKeys is mandatory here: the
+ * remainder output's asset wrapper (`OP_XNA_ASSET ... OP_DROP`) encodes a
+ * smaller `amountRaw` than the spent UTXO's wrapper, so the full-spk
+ * equality used by earlier drafts was vacuously unsatisfiable on any
+ * asset-wrapped covenant UTXO.
  *
  * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`) and
  * commits to a 20-byte PKH. As a consequence this variant only accepts
@@ -1856,11 +1866,14 @@ function buildPartialFillScript(params) {
         .op(OP_OUTPUTASSETFIELD) // [ N, name_out1 ]
         .pushBytes(tokenIdBytes)
         .op(OP_EQUALVERIFY); // [ N ]
-    // 5. Remainder covenant continuity (output 2): same scriptPubKey as spent
+    // 5. Remainder covenant continuity (output 2): same AuthScript commitment
+    //    as spent. NIP-023: comparing 32-byte commitments rather than full
+    //    scriptPubKeys, because the remainder's asset wrapper carries a
+    //    different `amountRaw` than the spent UTXO's wrapper.
     b.pushInt(2)
-        .op(OP_OUTPUTSCRIPT) // [ N, spk_out2 ]
-        .pushInt(TXFIELD_SCRIPTPUBKEY)
-        .op(OP_TXFIELD) // [ N, spk_out2, spent_spk ]
+        .op(OP_OUTPUTAUTHCOMMITMENT) // [ N, auth_out2 ]
+        .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
+        .op(OP_TXFIELD) // [ N, auth_out2, spent_auth ]
         .op(OP_EQUALVERIFY); // [ N ]
     // 6. Remainder output: same tokenId
     b.pushInt(2)
@@ -2011,10 +2024,12 @@ function buildPartialFillScriptPQ(params) {
         .op(OP_OUTPUTASSETFIELD)
         .pushBytes(tokenIdBytes)
         .op(OP_EQUALVERIFY);
-    // 5. Remainder continuity (output 2) — same scriptPubKey as spent
+    // 5. Remainder continuity (output 2) — same AuthScript commitment as spent
+    //    (NIP-023; see script.ts for why full-spk equality is unsatisfiable on
+    //    asset-wrapped covenant UTXOs).
     b.pushInt(2)
-        .op(OP_OUTPUTSCRIPT)
-        .pushInt(TXFIELD_SCRIPTPUBKEY)
+        .op(OP_OUTPUTAUTHCOMMITMENT)
+        .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
         .op(OP_TXFIELD)
         .op(OP_EQUALVERIFY);
     // 6. Remainder tokenId
@@ -2360,12 +2375,12 @@ function parsePartialFillScript(script, network = 'xna-test') {
     expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name)');
     const tokenIdBytes1 = readPush(c, 'tokenId #1');
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name)');
-    // ───── Remainder continuity: same scriptPubKey ─────
+    // ───── Remainder continuity: same AuthScript commitment (NIP-023) ─────
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
-    expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (remainder)');
-    expectByte(c, OP_3, 'OP_3 (TXFIELD selector)');
+    expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
+    expectByte(c, OP_2, 'OP_2 (TXFIELD selector: AUTHSCRIPT_COMMITMENT)');
     expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
-    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder spk)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
     // ───── Remainder tokenId check ─────
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
     expectByte(c, OP_1, 'OP_1 (NAME selector)');
@@ -2466,11 +2481,12 @@ function parsePartialFillScriptPQ(script, network = 'xna-test') {
     expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name)');
     const tokenIdBytes1 = readPush(c, 'tokenId #1');
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name)');
+    // Remainder continuity: same AuthScript commitment (NIP-023)
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
-    expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (remainder)');
-    expectByte(c, OP_3, 'OP_3 (TXFIELD selector)');
+    expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
+    expectByte(c, OP_2, 'OP_2 (TXFIELD selector: AUTHSCRIPT_COMMITMENT)');
     expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
-    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder spk)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
     expectByte(c, OP_1, 'OP_1 (NAME selector)');
     expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder name)');

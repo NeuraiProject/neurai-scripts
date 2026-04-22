@@ -13,12 +13,16 @@
  *
  *   output[0] = XNA payment to seller   (value >= N * unitPriceSats)
  *   output[1] = asset to buyer          (tokenId, amount == N)
- *   output[2] = covenant remainder      (same scriptPubKey, amount == in - N)
+ *   output[2] = covenant remainder      (same AuthScript commitment, amount == in - N)
  *   output[3+] = optional buyer change  (not constrained by the covenant)
  *
- * The remainder UTXO reuses the spent scriptPubKey via
- * `OP_OUTPUTSCRIPT == OP_TXFIELD 0x03`, so the covenant is self-replicating
- * without hardcoding its own hash.
+ * The remainder UTXO reuses the spent covenant's AuthScript v1 commitment
+ * via `OP_OUTPUTAUTHCOMMITMENT(2) == OP_TXFIELD(0x02)` (NIP-023). Comparing
+ * commitments rather than full scriptPubKeys is mandatory here: the
+ * remainder output's asset wrapper (`OP_XNA_ASSET ... OP_DROP`) encodes a
+ * smaller `amountRaw` than the spent UTXO's wrapper, so the full-spk
+ * equality used by earlier drafts was vacuously unsatisfiable on any
+ * asset-wrapped covenant UTXO.
  *
  * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`) and
  * commits to a 20-byte PKH. As a consequence this variant only accepts

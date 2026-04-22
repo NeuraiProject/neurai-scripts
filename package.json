@@ -1,6 +1,6 @@
 {
   "name": "@neuraiproject/neurai-scripts",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Script-assembly library for Neurai: opcode constants, ScriptBuilder, standard scripts (P2PKH, P2WPKH, P2WSH, AuthScript, multisig, OP_RETURN) and covenants (partial-fill sell orders, legacy + PQ) targeting the DePIN-Test opcode set",
   "type": "module",
   "main": "./dist/index.cjs",
