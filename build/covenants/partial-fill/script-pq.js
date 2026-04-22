@@ -1,9 +1,9 @@
 /**
  * PQ (post-quantum) variant of the Partial-Fill Sell Order covenant.
  *
- * Identical partial-fill branch to the legacy covenant, but the **cancel**
- * branch accepts an ML-DSA-44 signature instead of an ECDSA one. This
- * requires:
+ * Identical fill branches (full + partial) to the legacy covenant, but the
+ * **cancel** branch accepts an ML-DSA-44 signature instead of an ECDSA one.
+ * This requires:
  *   - `SCRIPT_VERIFY_CHECKSIGFROMSTACK` (for OP_CSFS) active
  *   - `SCRIPT_VERIFY_TXHASH` (for OP_TXHASH) active
  *   - NIP-18 (`MAX_PQ_SCRIPT_ELEMENT_SIZE = 3072`) active, so the ~2.4 KB
@@ -21,6 +21,9 @@
  * single-SHA256s its message argument before verification, and OP_TXHASH
  * produces its own 32-byte hash, so the seller computes:
  *   `sign(pqSeckey, SHA256(doubleSHA256(selected_tx_fields)))`
+ *
+ * Fill branches are identical in structure to the legacy variant — see
+ * `./script.ts` for the three-branch layout description.
  */
 import { bytesToHex } from '../../core/bytes.js';
 import { encodeSellerScriptPubKey } from '../../address.js';
@@ -75,29 +78,64 @@ export function buildPartialFillScriptPQ(params) {
     const payment = encodeSellerScriptPubKey(paymentAddress);
     const tokenIdBytes = new TextEncoder().encode(tokenId);
     const b = new ScriptBuilder();
-    // ───────── Cancel branch (PQ via OP_CHECKSIGFROMSTACK) ─────────
-    // scriptSig expected: <sigPQ> <pubKeyPQ> OP_1
+    // ════════ Cancel branch (PQ via OP_CHECKSIGFROMSTACK) ════════
+    // scriptSig: <sigPQ> <pubKeyPQ> <1>
     // After OP_IF consumes the flag: [ sig, pubKey ]
     //
-    // The selector MUST be pushed as a raw 1-byte element — consensus
-    // (`interpreter.cpp` OP_TXHASH case) rejects any stack item of
-    // size ≠ 1. Using `pushInt(selector)` would work for 1..127 but emit a
-    // 2-byte CScriptNum for 0x80..0xff (the sign-disambiguation pad), which
-    // makes OP_TXHASH fail with SCRIPT_ERR_TXHASH. See
-    // `memory/project_covenant_v3_findings.md` bug B for details.
+    // The selector MUST be pushed as a raw 1-byte element — consensus rejects
+    // any stack item of size ≠ 1. Using `pushInt(selector)` would work for
+    // 1..127 but emit a 2-byte CScriptNum for 0x80..0xff (sign-disambiguation
+    // pad), which makes OP_TXHASH fail with SCRIPT_ERR_TXHASH.
     b.op(OP_IF)
         .op(OP_DUP) // [ sig, pubKey, pubKey ]
         .op(OP_SHA256) // [ sig, pubKey, H(pubKey) ]
         .pushBytes(pubKeyCommitment) // [ sig, pubKey, H(pubKey), commitment ]
         .op(OP_EQUALVERIFY) // [ sig, pubKey ]
-        .pushBytes(Uint8Array.of(txHashSelector)) // [ sig, pubKey, selector ] — always 1-byte stack item
+        .pushBytes(Uint8Array.of(txHashSelector)) // [ sig, pubKey, selector ]
         .op(OP_TXHASH) // [ sig, pubKey, txHash ]
         .op(OP_SWAP) // [ sig, txHash, pubKey ]
         .op(OP_CHECKSIGFROMSTACK) // [ 1 | 0 ]
         .op(OP_ELSE);
-    // ───────── Partial-fill branch (identical layout to legacy) ─────────
-    // scriptSig expected: <N> OP_0
-    // Stack entering ELSE: [ N ]
+    // ════════ Fill branches (inner IF: full / ELSE: partial) ════════
+    b.op(OP_IF);
+    // ──────── Full-fill branch ────────
+    // scriptSig: <1> <0>
+    // Stack entering: [ ]
+    // 1. N = inputAmount
+    b.pushInt(0)
+        .pushInt(ASSETFIELD_AMOUNT)
+        .op(OP_INPUTASSETFIELD);
+    // 2. Payment value (output 0) >= N * unitPriceSats
+    b.op(OP_DUP)
+        .pushInt(unitPriceSats)
+        .op(OP_MUL)
+        .pushInt(0)
+        .op(OP_OUTPUTVALUE)
+        .op(OP_SWAP)
+        .op(OP_GREATERTHANOREQUAL)
+        .op(OP_VERIFY);
+    // 3. Payment scriptPubKey (output 0)
+    b.pushInt(0)
+        .op(OP_OUTPUTSCRIPT)
+        .pushBytes(payment.bytes)
+        .op(OP_EQUALVERIFY);
+    // 4. Asset to buyer (output 1) amount == N
+    b.op(OP_DUP)
+        .pushInt(1)
+        .pushInt(ASSETFIELD_AMOUNT)
+        .op(OP_OUTPUTASSETFIELD)
+        .op(OP_EQUALVERIFY);
+    // 5. Asset to buyer (output 1) name == tokenId
+    b.pushInt(1)
+        .pushInt(ASSETFIELD_NAME)
+        .op(OP_OUTPUTASSETFIELD)
+        .pushBytes(tokenIdBytes)
+        .op(OP_EQUALVERIFY);
+    b.op(OP_DROP).pushInt(1);
+    // ──────── Partial-fill branch ────────
+    // scriptSig: <N> <0> <0>
+    // Stack entering: [ N ]
+    b.op(OP_ELSE);
     // 1. Payment value (output 0) >= N * unitPriceSats
     b.op(OP_DUP)
         .pushInt(unitPriceSats)
@@ -107,7 +145,7 @@ export function buildPartialFillScriptPQ(params) {
         .op(OP_SWAP)
         .op(OP_GREATERTHANOREQUAL)
         .op(OP_VERIFY);
-    // 2. Payment scriptPubKey (output 0) == payment.bytes
+    // 2. Payment scriptPubKey (output 0)
     b.pushInt(0)
         .op(OP_OUTPUTSCRIPT)
         .pushBytes(payment.bytes)
@@ -124,21 +162,19 @@ export function buildPartialFillScriptPQ(params) {
         .op(OP_OUTPUTASSETFIELD)
         .pushBytes(tokenIdBytes)
         .op(OP_EQUALVERIFY);
-    // 5. Remainder continuity (output 2) — same AuthScript commitment as spent
-    //    (NIP-023; see script.ts for why full-spk equality is unsatisfiable on
-    //    asset-wrapped covenant UTXOs).
+    // 5. Continuation (output 2): same AuthScript commitment as spent (NIP-023)
     b.pushInt(2)
         .op(OP_OUTPUTAUTHCOMMITMENT)
         .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
         .op(OP_TXFIELD)
         .op(OP_EQUALVERIFY);
-    // 6. Remainder tokenId
+    // 6. Continuation name == tokenId
     b.pushInt(2)
         .pushInt(ASSETFIELD_NAME)
         .op(OP_OUTPUTASSETFIELD)
         .pushBytes(tokenIdBytes)
         .op(OP_EQUALVERIFY);
-    // 7. Remainder amount == inputAssetAmount - N
+    // 7. Continuation amount == inputAmount - N
     b.pushInt(2)
         .pushInt(ASSETFIELD_AMOUNT)
         .op(OP_OUTPUTASSETFIELD)
@@ -150,7 +186,8 @@ export function buildPartialFillScriptPQ(params) {
         .op(OP_SUB)
         .op(OP_EQUALVERIFY);
     b.op(OP_DROP).pushInt(1);
-    b.op(OP_ENDIF);
+    b.op(OP_ENDIF); // full / partial
+    b.op(OP_ENDIF); // cancel / fill
     return b.build();
 }
 export function buildPartialFillScriptPQHex(params) {

@@ -11,34 +11,53 @@ import { bytesToHex } from '../../core/bytes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
 
 /**
- * Unlock the covenant via the public partial-fill branch.
+ * Unlock the covenant via the public fill branches.
  *
- * Layout on the stack before OP_IF executes (top → bottom):
- *   0   ← selects the OP_ELSE (fill) branch
- *   N   ← amount of asset the buyer is taking from this order
+ *   amount === total  →  full-fill branch. The entire covenant drains to
+ *                        vout[1]; no vout[2] continuation is emitted.
+ *   amount <  total   →  partial-fill branch. vout[2] re-locks the
+ *                        continuation (`total - amount` units).
  *
- * so the scriptSig pushes `<N>` then `<0>`.
+ * Unlock stack shapes (pushed bottom → top):
  *
- * @param amount  units of the asset the buyer is taking. Must be > 0 and
- *                strictly less than the amount locked in the order UTXO
- *                (equal would leave a zero-asset remainder, which isn't a
- *                valid Neurai transfer output).
+ *   Full fill:     <1> <0>         ( full-flag=1, cancel-flag=0 )
+ *   Partial fill:  <N> <0> <0>     ( N, full-flag=0, cancel-flag=0 )
+ *
+ * @param amount  units the buyer is taking. Must be > 0 and ≤ total.
+ * @param total   current asset amount locked in the covenant UTXO. The
+ *                builder reads this to decide whether to emit the full-fill
+ *                or partial-fill witness — consensus uses `OP_INPUTASSETFIELD`
+ *                inside the covenant to check it independently, so the value
+ *                passed here must match on-chain reality or the script fails.
  */
-export function buildFillScriptSig(amount: bigint): Uint8Array {
-  if (typeof amount !== 'bigint') {
-    throw new Error('amount must be a bigint');
+export function buildFillScriptSig(amount: bigint, total: bigint): Uint8Array {
+  if (typeof amount !== 'bigint' || typeof total !== 'bigint') {
+    throw new Error('amount and total must be bigint');
   }
   if (amount <= 0n) {
     throw new Error('fill amount must be > 0');
   }
-  return new ScriptBuilder()
-    .pushInt(amount)
-    .pushInt(0)
-    .build();
+  if (total <= 0n) {
+    throw new Error('total must be > 0');
+  }
+  if (amount > total) {
+    throw new Error('fill amount exceeds the covenant total');
+  }
+
+  const b = new ScriptBuilder();
+  if (amount === total) {
+    // Full fill: covenant drains entirely. Buyer does not push N — the
+    // covenant reads it via OP_INPUTASSETFIELD.
+    b.pushInt(1).pushInt(0);
+  } else {
+    // Partial fill: buyer pushes N, then both flag bytes.
+    b.pushInt(amount).pushInt(0).pushInt(0);
+  }
+  return b.build();
 }
 
-export function buildFillScriptSigHex(amount: bigint): string {
-  return bytesToHex(buildFillScriptSig(amount));
+export function buildFillScriptSigHex(amount: bigint, total: bigint): string {
+  return bytesToHex(buildFillScriptSig(amount, total));
 }
 
 /**

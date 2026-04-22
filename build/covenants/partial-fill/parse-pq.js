@@ -1,8 +1,12 @@
 /**
- * Parser for the PQ Partial-Fill Sell Order covenant. Returns the same
- * economic parameters as the legacy parser, plus the payment scriptPubKey
- * bytes (which may be P2PKH or AuthScript) and the configured TXHASH
- * selector.
+ * Parser for the PQ Partial-Fill Sell Order covenant (three-branch).
+ * Returns the same economic parameters as the legacy parser, plus the
+ * payment scriptPubKey bytes (which may be P2PKH or AuthScript) and the
+ * configured TXHASH selector.
+ *
+ * The full-fill and partial-fill branches share `(paymentScriptPubKey,
+ * unitPriceSats, tokenId)`. The parser reads both branches and verifies
+ * consistency; inconsistency throws.
  */
 import { bytesEqual, bytesToHex, hexToBytes } from '../../core/bytes.js';
 import { OP_0, OP_1, OP_2, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
@@ -23,8 +27,8 @@ export function isPartialFillScriptPQ(script) {
 export function parsePartialFillScriptPQ(script, network = 'xna-test') {
     const bytes = typeof script === 'string' ? hexToBytes(script) : script;
     const c = makeCursor(bytes);
-    // ───── Cancel branch (PQ) ─────
-    expectByte(c, OP_IF, 'OP_IF');
+    // ═════ Outer IF — Cancel branch (PQ) ═════
+    expectByte(c, OP_IF, 'OP_IF (outer cancel)');
     expectByte(c, OP_DUP, 'OP_DUP (cancel)');
     expectByte(c, OP_SHA256, 'OP_SHA256');
     const pubKeyCommitment = readPush(c, 'pubKeyCommitment');
@@ -32,9 +36,6 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
         throw new Error(`parse-pq: pubKeyCommitment must be 32 bytes, got ${pubKeyCommitment.length}`);
     }
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (cancel)');
-    // Selector is read as an unsigned byte — consensus OP_TXHASH treats the
-    // on-stack element as uint8, and the builder emits a raw 1-byte push so
-    // selectors 0x80..0xff round-trip correctly (plan v3 bug B).
     const txHashSelector = readPushUint8(c, 'txHashSelector');
     if (txHashSelector < 1) {
         throw new Error(`parse-pq: txHashSelector 0x00 is rejected by OP_TXHASH`);
@@ -42,68 +43,109 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
     expectByte(c, OP_TXHASH, 'OP_TXHASH');
     expectByte(c, OP_SWAP, 'OP_SWAP');
     expectByte(c, OP_CHECKSIGFROMSTACK, 'OP_CHECKSIGFROMSTACK');
-    expectByte(c, OP_ELSE, 'OP_ELSE');
-    // ───── Fill branch ─────
-    expectByte(c, OP_DUP, 'OP_DUP (price)');
-    const unitPriceSats = readPushPositiveInt(c, 'unitPriceSats');
-    expectByte(c, OP_MUL, 'OP_MUL');
-    expectByte(c, OP_0, 'OP_0 (payment idx)');
-    expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE');
-    expectByte(c, OP_SWAP, 'OP_SWAP');
-    expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GE');
-    expectByte(c, OP_VERIFY, 'OP_VERIFY');
-    expectByte(c, OP_0, 'OP_0 (payment spk idx)');
-    expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment)');
-    const paymentScriptPubKey = readPush(c, 'paymentScriptPubKey');
-    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment)');
-    expectByte(c, OP_DUP, 'OP_DUP (buyer amount)');
-    expectByte(c, OP_1, 'OP_1 (buyer idx)');
-    expectByte(c, OP_2, 'OP_2 (AMOUNT selector)');
-    expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount)');
-    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount)');
-    expectByte(c, OP_1, 'OP_1 (buyer idx)');
-    expectByte(c, OP_1, 'OP_1 (NAME selector)');
-    expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name)');
-    const tokenIdBytes1 = readPush(c, 'tokenId #1');
-    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name)');
-    // Remainder continuity: same AuthScript commitment (NIP-023)
+    expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
+    // ═════ Inner IF — Full-fill branch ═════
+    expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+    expectByte(c, OP_0, 'OP_0 (input idx, full)');
+    expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
+    expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD (full)');
+    expectByte(c, OP_DUP, 'OP_DUP (price, full)');
+    const unitPriceSatsFull = readPushPositiveInt(c, 'unitPriceSats (full)');
+    expectByte(c, OP_MUL, 'OP_MUL (full)');
+    expectByte(c, OP_0, 'OP_0 (payment idx, full)');
+    expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE (full)');
+    expectByte(c, OP_SWAP, 'OP_SWAP (full)');
+    expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GE (full)');
+    expectByte(c, OP_VERIFY, 'OP_VERIFY (full)');
+    expectByte(c, OP_0, 'OP_0 (payment spk idx, full)');
+    expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment full)');
+    const paymentScriptPubKeyFull = readPush(c, 'paymentScriptPubKey (full)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment full)');
+    expectByte(c, OP_DUP, 'OP_DUP (buyer amount, full)');
+    expectByte(c, OP_1, 'OP_1 (buyer idx, full)');
+    expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
+    expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount, full)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount, full)');
+    expectByte(c, OP_1, 'OP_1 (buyer idx, full)');
+    expectByte(c, OP_1, 'OP_1 (NAME sel, full)');
+    expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name, full)');
+    const tokenIdFull = readPush(c, 'tokenId (full)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name, full)');
+    expectByte(c, OP_DROP, 'OP_DROP (full)');
+    expectByte(c, OP_1, 'OP_1 (true, full)');
+    expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
+    // ═════ Inner ELSE — Partial-fill branch ═════
+    expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
+    const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
+    expectByte(c, OP_MUL, 'OP_MUL (partial)');
+    expectByte(c, OP_0, 'OP_0 (payment idx, partial)');
+    expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE (partial)');
+    expectByte(c, OP_SWAP, 'OP_SWAP (partial)');
+    expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GE (partial)');
+    expectByte(c, OP_VERIFY, 'OP_VERIFY (partial)');
+    expectByte(c, OP_0, 'OP_0 (payment spk idx, partial)');
+    expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment partial)');
+    const paymentScriptPubKeyPartial = readPush(c, 'paymentScriptPubKey (partial)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment partial)');
+    expectByte(c, OP_DUP, 'OP_DUP (buyer amount, partial)');
+    expectByte(c, OP_1, 'OP_1 (buyer idx, partial)');
+    expectByte(c, OP_2, 'OP_2 (AMOUNT sel, partial)');
+    expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount, partial)');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount, partial)');
+    expectByte(c, OP_1, 'OP_1 (buyer idx, partial)');
+    expectByte(c, OP_1, 'OP_1 (NAME sel, partial)');
+    expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name, partial)');
+    const tokenIdPartial1 = readPush(c, 'tokenId partial #1');
+    expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name, partial)');
+    // Continuation commitment
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
     expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
-    expectByte(c, OP_2, 'OP_2 (TXFIELD selector: AUTHSCRIPT_COMMITMENT)');
+    expectByte(c, OP_2, 'OP_2 (TXFIELD sel: AUTHSCRIPT_COMMITMENT)');
     if (TXFIELD_AUTHSCRIPT_COMMITMENT !== 0x02)
         throw new Error('unexpected TXFIELD selector constant');
     expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
-    expectByte(c, OP_1, 'OP_1 (NAME selector)');
+    expectByte(c, OP_1, 'OP_1 (NAME sel)');
     expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder name)');
-    const tokenIdBytes2 = readPush(c, 'tokenId #2');
+    const tokenIdPartial2 = readPush(c, 'tokenId partial #2');
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder name)');
     expectByte(c, OP_2, 'OP_2 (remainder idx)');
-    expectByte(c, OP_2, 'OP_2 (AMOUNT selector)');
+    expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
     expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder amount)');
     expectByte(c, OP_OVER, 'OP_OVER');
     expectByte(c, OP_0, 'OP_0 (input idx)');
-    expectByte(c, OP_2, 'OP_2 (AMOUNT selector)');
+    expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
     expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD');
     expectByte(c, OP_SWAP, 'OP_SWAP');
     expectByte(c, OP_SUB, 'OP_SUB');
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder amount)');
-    expectByte(c, OP_DROP, 'OP_DROP');
-    expectByte(c, OP_1, 'OP_1 (true)');
-    expectByte(c, OP_ENDIF, 'OP_ENDIF');
+    expectByte(c, OP_DROP, 'OP_DROP (partial)');
+    expectByte(c, OP_1, 'OP_1 (true, partial)');
+    expectByte(c, OP_ENDIF, 'OP_ENDIF (inner)');
+    expectByte(c, OP_ENDIF, 'OP_ENDIF (outer)');
     assertTrailing(c);
-    if (!bytesEqual(tokenIdBytes1, tokenIdBytes2)) {
-        throw new Error('parse-pq: tokenId differs between buyer and remainder checks');
+    // Cross-branch consistency.
+    if (!bytesEqual(paymentScriptPubKeyFull, paymentScriptPubKeyPartial)) {
+        throw new Error('parse-pq: paymentScriptPubKey differs between full-fill and partial-fill branches');
     }
-    const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdBytes1);
+    if (!bytesEqual(tokenIdFull, tokenIdPartial1)) {
+        throw new Error('parse-pq: tokenId differs between full-fill and partial-fill branches');
+    }
+    if (!bytesEqual(tokenIdPartial1, tokenIdPartial2)) {
+        throw new Error('parse-pq: tokenId differs between buyer and remainder partial checks');
+    }
+    if (unitPriceSatsFull !== unitPriceSatsPartial) {
+        throw new Error('parse-pq: unitPriceSats differs between full-fill and partial-fill branches');
+    }
+    const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
     return {
         network,
         pubKeyCommitment,
         tokenId,
-        unitPriceSats,
+        unitPriceSats: unitPriceSatsFull,
         txHashSelector,
-        paymentScriptPubKey,
+        paymentScriptPubKey: paymentScriptPubKeyFull,
         scriptHex: bytesToHex(bytes)
     };
 }

@@ -307,17 +307,24 @@ checked against the covenant's hardcoded parameters using
 `OP_OUTPUTASSETFIELD`, `OP_OUTPUTSCRIPT` and `OP_OUTPUTVALUE`. Consensus
 enforces every rule; there is no trusted off-chain layer.
 
-Two spending branches are selected by the top of the unlock stack:
+Three spending branches are selected by the top of the unlock stack:
 
 - `OP_IF` (unlock pushed `1`) — **Cancel**. The seller signs and
   recovers the remainder. The legacy variant uses ECDSA
   (`OP_DUP OP_HASH160 <PKH> OP_EQUALVERIFY OP_CHECKSIG`); the PQ variant
   swaps this for `OP_CHECKSIGFROMSTACK` against an ML-DSA-44 signature
   (see *PQ variant* below).
-- `OP_ELSE` (unlock pushed `N` then `0`) — **Public partial fill**. Any
-  buyer can spend the UTXO by providing the fill amount `N`; consensus
-  validates the whole transaction layout against the embedded price,
-  token id, and seller destination. No seller signature is involved.
+- `OP_ELSE OP_IF` (unlock pushed `1 0`) — **Full fill**. Any buyer
+  can drain the entire covenant in one transaction. The tx has two
+  constrained outputs (`vout[0]` pays the seller, `vout[1]` delivers
+  the asset to the buyer) and **no `vout[2]` continuation** — the
+  covenant is fully consumed. Required because consensus rejects
+  asset transfers with `amount == 0`, so a partial fill that would
+  drain the lot is structurally impossible.
+- `OP_ELSE OP_ELSE` (unlock pushed `N 0 0`) — **Partial fill**. Any
+  buyer can take `N < total` by providing the fill amount; the
+  covenant's `vout[2]` re-locks the remainder (`total − N` units)
+  into an identical covenant UTXO. No seller signature is involved.
 
 This maps naturally onto Neurai's mempool: multiple buyers can submit
 their fill transactions in sequence, each one building on the previous
@@ -394,23 +401,34 @@ for (const utxo of candidateUtxos) {
 }
 ```
 
-#### Script layout (legacy)
+#### Script layout (legacy, three-branch)
 
 ```
-OP_IF
-  OP_DUP OP_HASH160 <sellerPKH> OP_EQUALVERIFY OP_CHECKSIG       // cancel branch
+OP_IF                                                              // cancel branch
+  OP_DUP OP_HASH160 <sellerPKH> OP_EQUALVERIFY OP_CHECKSIG
 OP_ELSE
-  # Stack entering ELSE: [ N ]
-  OP_DUP <unitPriceSats> OP_MUL
-      <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY  // payment value
-  <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY                // payment dest
-  OP_DUP <1> <0x02> OP_OUTPUTASSETFIELD OP_EQUALVERIFY            // buyer amount == N
-  <1> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY         // buyer name == tokenId
-  <2> OP_OUTPUTAUTHCOMMITMENT <0x02> OP_TXFIELD OP_EQUALVERIFY    // continuity (NIP-023)
-  <2> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY         // remainder name
-  <2> <0x02> OP_OUTPUTASSETFIELD OP_OVER
-      <0> <0x02> OP_INPUTASSETFIELD OP_SWAP OP_SUB OP_EQUALVERIFY // remainder = in - N
-  OP_DROP OP_1
+  OP_IF                                                            // full-fill branch
+    # Stack entering: [ ]  (scriptSig pushed <1> <0>)
+    <0> <0x02> OP_INPUTASSETFIELD                                  // N = inputAmount
+    OP_DUP <unitPriceSats> OP_MUL
+        <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY // payment value
+    <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY               // payment dest
+    OP_DUP <1> <0x02> OP_OUTPUTASSETFIELD OP_EQUALVERIFY           // buyer amount == N
+    <1> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY        // buyer name
+    OP_DROP OP_1                                                   // no vout[2] required
+  OP_ELSE                                                          // partial-fill branch
+    # Stack entering: [ N ]  (scriptSig pushed <N> <0> <0>)
+    OP_DUP <unitPriceSats> OP_MUL
+        <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY // payment value
+    <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY               // payment dest
+    OP_DUP <1> <0x02> OP_OUTPUTASSETFIELD OP_EQUALVERIFY           // buyer amount == N
+    <1> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY        // buyer name
+    <2> OP_OUTPUTAUTHCOMMITMENT <0x02> OP_TXFIELD OP_EQUALVERIFY   // continuity (NIP-023)
+    <2> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY        // remainder name
+    <2> <0x02> OP_OUTPUTASSETFIELD OP_OVER
+        <0> <0x02> OP_INPUTASSETFIELD OP_SWAP OP_SUB OP_EQUALVERIFY // remainder = in - N
+    OP_DROP OP_1
+  OP_ENDIF
 OP_ENDIF
 ```
 

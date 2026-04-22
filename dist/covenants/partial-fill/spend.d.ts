@@ -7,21 +7,27 @@
  * with `@neuraiproject/neurai-create-transaction`.
  */
 /**
- * Unlock the covenant via the public partial-fill branch.
+ * Unlock the covenant via the public fill branches.
  *
- * Layout on the stack before OP_IF executes (top → bottom):
- *   0   ← selects the OP_ELSE (fill) branch
- *   N   ← amount of asset the buyer is taking from this order
+ *   amount === total  →  full-fill branch. The entire covenant drains to
+ *                        vout[1]; no vout[2] continuation is emitted.
+ *   amount <  total   →  partial-fill branch. vout[2] re-locks the
+ *                        continuation (`total - amount` units).
  *
- * so the scriptSig pushes `<N>` then `<0>`.
+ * Unlock stack shapes (pushed bottom → top):
  *
- * @param amount  units of the asset the buyer is taking. Must be > 0 and
- *                strictly less than the amount locked in the order UTXO
- *                (equal would leave a zero-asset remainder, which isn't a
- *                valid Neurai transfer output).
+ *   Full fill:     <1> <0>         ( full-flag=1, cancel-flag=0 )
+ *   Partial fill:  <N> <0> <0>     ( N, full-flag=0, cancel-flag=0 )
+ *
+ * @param amount  units the buyer is taking. Must be > 0 and ≤ total.
+ * @param total   current asset amount locked in the covenant UTXO. The
+ *                builder reads this to decide whether to emit the full-fill
+ *                or partial-fill witness — consensus uses `OP_INPUTASSETFIELD`
+ *                inside the covenant to check it independently, so the value
+ *                passed here must match on-chain reality or the script fails.
  */
-export declare function buildFillScriptSig(amount: bigint): Uint8Array;
-export declare function buildFillScriptSigHex(amount: bigint): string;
+export declare function buildFillScriptSig(amount: bigint, total: bigint): Uint8Array;
+export declare function buildFillScriptSigHex(amount: bigint, total: bigint): string;
 /**
  * Unlock the covenant via the seller's cancel branch.
  *

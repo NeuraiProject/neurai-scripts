@@ -20,46 +20,67 @@ const baseParams: PartialFillOrderParams = {
 };
 
 /**
- * Byte-exact fixture. Any change to the covenant byte layout should update
- * this string in a single place so the regression is obvious in diffs.
- * The PKH inside the script is still `aa * 20`; only the input form
- * changed from raw PKH to `sellerAddress`.
+ * Byte-exact fixture for the three-branch covenant. Any change to the
+ * covenant byte layout should update this string in a single place so the
+ * regression is obvious in diffs.
  *
- * Layout (hand-computed once, do not edit without reading the comment in
- * src/covenants/partial-fill/script.ts):
+ * Layout:
  *
- *   IF
- *     DUP HASH160 <PKH=aa*20> EQUALVERIFY CHECKSIG
+ *   IF                              ← cancel branch
+ *     DUP HASH160 <PKH> EQUALVERIFY CHECKSIG
  *   ELSE
- *     DUP <0400e1f505=100_000_000> MUL <0> OUTPUTVALUE SWAP GE VERIFY
- *     <0> OUTPUTSCRIPT <25B P2PKH(PKH)> EQUALVERIFY
- *     DUP <1> <2> OUTPUTASSETFIELD EQUALVERIFY
- *     <1> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
- *     <2> OUTPUTAUTHCOMMITMENT <2> TXFIELD EQUALVERIFY  (NIP-023)
- *     <2> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
- *     <2> <2> OUTPUTASSETFIELD OVER <0> <2> INPUTASSETFIELD SWAP SUB EQUALVERIFY
- *     DROP <1>
+ *     IF                            ← inner: full-fill branch
+ *       <0> <2> INPUTASSETFIELD                                      (N = inputAmount)
+ *       DUP <price> MUL <0> OUTPUTVALUE SWAP GE VERIFY               (payment value)
+ *       <0> OUTPUTSCRIPT <25B P2PKH(PKH)> EQUALVERIFY                (payment dest)
+ *       DUP <1> <2> OUTPUTASSETFIELD EQUALVERIFY                     (buyer amount == N)
+ *       <1> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY                 (buyer name)
+ *       DROP <1>
+ *     ELSE                          ← inner: partial-fill branch
+ *       DUP <price> MUL <0> OUTPUTVALUE SWAP GE VERIFY
+ *       <0> OUTPUTSCRIPT <25B P2PKH(PKH)> EQUALVERIFY
+ *       DUP <1> <2> OUTPUTASSETFIELD EQUALVERIFY
+ *       <1> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
+ *       <2> OUTPUTAUTHCOMMITMENT <2> TXFIELD EQUALVERIFY             (NIP-023 continuity)
+ *       <2> <1> OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
+ *       <2> <2> OUTPUTASSETFIELD OVER <0> <2> INPUTASSETFIELD SWAP SUB EQUALVERIFY
+ *       DROP <1>
+ *     ENDIF
  *   ENDIF
  */
 const EXPECTED_SCRIPT_HEX =
+  // ── Cancel branch ──
   '63' +                                                               // OP_IF
   '76a9' +                                                             // DUP HASH160
-  '14' + 'aa'.repeat(20) +                                             // push PKH
+  '14' + 'aa'.repeat(20) +                                             // push 20B PKH
   '88ac' +                                                             // EQUALVERIFY CHECKSIG
-  '67' +                                                               // OP_ELSE
-  '76' +                                                               // OP_DUP
-  '0400e1f505' +                                                       // push 100_000_000
-  '95' + '00' + 'cc' + '7c' + 'a2' + '69' +                            // MUL 0 OUTPUTVALUE SWAP GE VERIFY
-  '00' + 'cd' +                                                        // 0 OUTPUTSCRIPT
-  '19' + '76a914' + 'aa'.repeat(20) + '88ac' +                         // push sellerScriptPubKey (25B)
+
+  // ── Outer ELSE → inner IF (full-fill) ──
+  '67' +                                                               // OP_ELSE (outer)
+  '63' +                                                               // OP_IF (inner: full-fill)
+  '0052cf' +                                                           // <0> <2> INPUTASSETFIELD
+  '76' + '0400e1f505' + '95' +                                         // DUP <price> MUL
+  '00' + 'cc' + '7c' + 'a2' + '69' +                                   // <0> OUTPUTVALUE SWAP GE VERIFY
+  '00' + 'cd' +                                                        // <0> OUTPUTSCRIPT
+  '19' + '76a914' + 'aa'.repeat(20) + '88ac' +                         // push 25B sellerSPK
   '88' +                                                               // EQUALVERIFY
-  '76' + '51' + '52' + 'ce' + '88' +                                   // DUP 1 2 OUTPUTASSETFIELD EQUALVERIFY
-  '51' + '51' + 'ce' + '03434154' + '88' +                             // 1 1 OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
-  '52' + 'd5' + '52' + 'b6' + '88' +                                   // 2 OUTPUTAUTHCOMMITMENT 2 TXFIELD EQUALVERIFY (NIP-023)
-  '52' + '51' + 'ce' + '03434154' + '88' +                             // 2 1 OUTPUTASSETFIELD <"CAT"> EQUALVERIFY
-  '52' + '52' + 'ce' + '78' + '00' + '52' + 'cf' + '7c' + '94' + '88' +
-  '75' + '51' +                                                        // DROP 1
-  '68';                                                                // ENDIF
+  '7651' + '52' + 'ce' + '88' +                                        // DUP <1> <2> OUTPUTASSETFIELD EQUALVERIFY
+  '5151' + 'ce' + '03434154' + '88' +                                  // <1> <1> OUTPUTASSETFIELD "CAT" EQUALVERIFY
+  '7551' +                                                             // DROP <1>
+
+  // ── Inner ELSE (partial-fill) ──
+  '67' +                                                               // OP_ELSE (inner)
+  '76' + '0400e1f505' + '95' + '00' + 'cc' + '7c' + 'a2' + '69' +      // payment value
+  '00' + 'cd' + '19' + '76a914' + 'aa'.repeat(20) + '88ac' + '88' +    // payment spk
+  '7651' + '52' + 'ce' + '88' +                                        // buyer amount
+  '5151' + 'ce' + '03434154' + '88' +                                  // buyer name
+  '52' + 'd5' + '52' + 'b6' + '88' +                                   // remainder auth commitment (NIP-023)
+  '52' + '51' + 'ce' + '03434154' + '88' +                             // remainder name
+  '52' + '52' + 'ce' + '78' + '00' + '52' + 'cf' + '7c' + '94' + '88' + // remainder amount
+  '7551' +                                                             // DROP <1>
+
+  '68' +                                                               // OP_ENDIF (inner)
+  '68';                                                                // OP_ENDIF (outer)
 
 describe('buildPartialFillScript', () => {
   it('matches the byte-exact fixture for the canonical CAT order', () => {
@@ -102,13 +123,14 @@ describe('buildPartialFillScript', () => {
     const a = buildPartialFillScript(baseParams);
     const b = buildPartialFillScript({ ...baseParams, sellerAddress: otherAddress });
     expect(a.length).toBe(b.length);
-    // Exactly two PKH occurrences in the script (cancel branch + payment spk).
+    // Three PKH occurrences per script — cancel branch + payment spk in each
+    // of the two fill branches (full-fill and partial-fill).
     const aHex = bytesToHex(a);
     const bHex = bytesToHex(b);
     const aa = aHex.split('aa'.repeat(20)).length - 1;
-    expect(aa).toBe(2);
+    expect(aa).toBe(3);
     const bb = bHex.split('bb'.repeat(20)).length - 1;
-    expect(bb).toBe(2);
+    expect(bb).toBe(3);
   });
 });
 
@@ -119,7 +141,6 @@ describe('parsePartialFillScript', () => {
     expect(parsed.tokenId).toBe('CAT');
     expect(parsed.unitPriceSats).toBe(100_000_000n);
     expect(bytesToHex(parsed.sellerPubKeyHash)).toBe('aa'.repeat(20));
-    // Parser does not synthesize an address string from the PKH.
     expect((parsed as Record<string, unknown>).sellerAddress).toBeUndefined();
   });
 
@@ -137,10 +158,10 @@ describe('parsePartialFillScript', () => {
     expect(parsed.tokenId).toBe(tokenId);
   });
 
-  it('fails when the cancel PKH and payment PKH diverge', () => {
+  it('fails when the cancel PKH and the first fill-branch PKH diverge', () => {
     const bytes = buildPartialFillScript(baseParams);
-    // Flip the last byte of the *second* PKH (inside the payment-spk push).
-    // The second occurrence starts later in the script; find it by scanning.
+    // Flip the last byte of the *second* PKH occurrence (first fill-branch
+    // payment spk, inside the full-fill body).
     const marker = 'aa'.repeat(20);
     const hex = bytesToHex(bytes);
     const firstIdx = hex.indexOf(marker);
@@ -156,26 +177,46 @@ describe('parsePartialFillScript', () => {
   });
 
   it('rejects an unrelated script', () => {
-    // A bare P2PKH, not a partial-fill covenant.
     const p2pkh = '76a914' + 'bb'.repeat(20) + '88ac';
     expect(() => parsePartialFillScript(p2pkh)).toThrow();
   });
 });
 
 describe('buildFillScriptSig / buildCancelScriptSig', () => {
-  it('encodes a fill with `<N> <0>` for small N', () => {
-    // N=5 → OP_5 = 0x55, then OP_0 = 0x00
-    expect(buildFillScriptSigHex(5n)).toBe('5500');
+  // Partial fill: amount < total → pushes <N> <0> <0>
+  it('encodes a partial fill with `<N> <0> <0>` for small N', () => {
+    // N=5, total=10 → OP_5 (55) + OP_0 (00) + OP_0 (00)
+    expect(buildFillScriptSigHex(5n, 10n)).toBe('550000');
   });
 
-  it('encodes a fill with a direct-push number past OP_N', () => {
-    // N=1000 → CScriptNum e8 03, pushed as 02 e8 03, then OP_0 = 00
-    expect(buildFillScriptSigHex(1000n)).toBe('02e80300');
+  it('encodes a partial fill with a direct-push number past OP_N', () => {
+    // N=1000 → CScriptNum e8 03, pushed as 02 e8 03, then 00 00
+    expect(buildFillScriptSigHex(1000n, 10000n)).toBe('02e8030000');
+  });
+
+  // Full fill: amount === total → pushes <1> <0>
+  it('encodes a full fill with `<1> <0>` when amount === total', () => {
+    // full-flag=1 (OP_1 = 51), cancel-flag=0 (OP_0 = 00)
+    expect(buildFillScriptSigHex(10n, 10n)).toBe('5100');
+  });
+
+  it('encodes a full fill independently of the absolute amount', () => {
+    expect(buildFillScriptSigHex(1n, 1n)).toBe('5100');
+    expect(buildFillScriptSigHex(1_000_000n, 1_000_000n)).toBe('5100');
   });
 
   it('rejects non-positive fills', () => {
-    expect(() => buildFillScriptSigHex(0n)).toThrow(/> 0/);
-    expect(() => buildFillScriptSigHex(-1n)).toThrow(/> 0/);
+    expect(() => buildFillScriptSigHex(0n, 10n)).toThrow(/> 0/);
+    expect(() => buildFillScriptSigHex(-1n, 10n)).toThrow(/> 0/);
+  });
+
+  it('rejects fills exceeding the covenant total', () => {
+    expect(() => buildFillScriptSigHex(11n, 10n)).toThrow(/exceeds/);
+  });
+
+  it('rejects zero or negative total', () => {
+    expect(() => buildFillScriptSigHex(1n, 0n)).toThrow(/> 0/);
+    expect(() => buildFillScriptSigHex(1n, -5n)).toThrow(/> 0/);
   });
 
   it('encodes a cancel with `<sig> <pubkey> <1>`', () => {
@@ -195,10 +236,6 @@ describe('buildFillScriptSig / buildCancelScriptSig', () => {
 
 describe('integration: Alice → Bob → Carol → cancel', () => {
   it('parser extracts consistent state after two successive fills (simulated)', () => {
-    // The script is self-replicating: both Bob's fill and Carol's fill
-    // spend a covenant whose scriptPubKey bytes are IDENTICAL. This test
-    // asserts exactly that: parsing the original order and parsing a
-    // "virtual remainder" (same bytes) yields the same parameters.
     const scriptHex = buildPartialFillScriptHex(baseParams);
     const aliceOrder = parsePartialFillScript(scriptHex);
     const afterBob = parsePartialFillScript(scriptHex);

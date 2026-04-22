@@ -1,9 +1,9 @@
 /**
  * PQ (post-quantum) variant of the Partial-Fill Sell Order covenant.
  *
- * Identical partial-fill branch to the legacy covenant, but the **cancel**
- * branch accepts an ML-DSA-44 signature instead of an ECDSA one. This
- * requires:
+ * Identical fill branches (full + partial) to the legacy covenant, but the
+ * **cancel** branch accepts an ML-DSA-44 signature instead of an ECDSA one.
+ * This requires:
  *   - `SCRIPT_VERIFY_CHECKSIGFROMSTACK` (for OP_CSFS) active
  *   - `SCRIPT_VERIFY_TXHASH` (for OP_TXHASH) active
  *   - NIP-18 (`MAX_PQ_SCRIPT_ELEMENT_SIZE = 3072`) active, so the ~2.4 KB
@@ -21,6 +21,9 @@
  * single-SHA256s its message argument before verification, and OP_TXHASH
  * produces its own 32-byte hash, so the seller computes:
  *   `sign(pqSeckey, SHA256(doubleSHA256(selected_tx_fields)))`
+ *
+ * Fill branches are identical in structure to the legacy variant — see
+ * `./script.ts` for the three-branch layout description.
  */
 import type { PartialFillOrderPQParams } from '../../types.js';
 export declare const DEFAULT_PQ_TXHASH_SELECTOR = 255;
