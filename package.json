@@ -36,7 +36,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@neuraiproject/neurai-create-transaction": "^0.2.0"
+    "@neuraiproject/neurai-create-transaction": "^0.3.1"
   },
   "keywords": [
     "neurai",
