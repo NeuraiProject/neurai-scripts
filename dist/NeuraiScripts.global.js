@@ -156,6 +156,26 @@ var NeuraiScriptsBundle = (function (exports) {
     const OP_CHECKSIGVERIFY = 0xad;
     const OP_CHECKMULTISIG = 0xae;
     const OP_CHECKMULTISIGVERIFY = 0xaf;
+    // ---------- Extended hash opcodes ----------
+    // NIP-030: KECCAK256 / BLAKE2B in previously unassigned slots.
+    const OP_KECCAK256 = 0xba;
+    const OP_BLAKE2B = 0xbb;
+    // NIP-034a: modern hash opcodes (BLAKE3, SHA3-256, SHA-512).
+    // NIP-036: OP_POSEIDON — SNARK-friendly Poseidon hash over the BN254
+    // scalar field. Occupies slot 0xc9.
+    const OP_BLAKE3 = 0xc8;
+    const OP_POSEIDON = 0xc9;
+    const OP_SHA3_256 = 0xca;
+    const OP_SHA512 = 0xcb;
+    // ---------- Extended signature opcodes ----------
+    // NIP-035: strict-profile RFC 8032 PureEd25519 verifier in slot 0xdd.
+    // Stack contract: (sig64, msg, pubkey32 -- 0|1). Slots 0xd8..0xdc are
+    // reserved by NIP-033 (BLS12-381 family), unassigned in current code.
+    const OP_CHECKSIG_ED25519 = 0xdd;
+    // NIP-039: generic OP_CHECKSIG-compatible signature accumulator in slot
+    // 0xde. Stack contract: (sig, count, pubkey -- count + 0|1). Works with
+    // both legacy secp256k1 and PQ ML-DSA-44 keys via CPubKey::Verify().
+    const OP_CHECKSIGADD = 0xde;
     // ---------- Expansion / NOPs ----------
     // Only the NOPs not aliased by DePIN-Test opcodes are exported as NOPs.
     //   OP_NOP2 == OP_CHECKLOCKTIMEVERIFY (0xb1)
@@ -195,6 +215,17 @@ var NeuraiScriptsBundle = (function (exports) {
     // scriptPubKey. Symmetric to TXFIELD_AUTHSCRIPT_COMMITMENT for inputs;
     // ignores any trailing OP_XNA_ASSET asset wrapper bytes.
     const OP_OUTPUTAUTHCOMMITMENT = 0xd5;
+    // ---------- Input value introspection (NIP-024) ----------
+    // Pushes the satoshi value of a selected input's spent prevout.
+    const OP_INPUTVALUE = 0xd6;
+    // ---------- Chain context introspection (NIP-026) ----------
+    // Pushes chain-context fields (block height, median time, etc.) selected
+    // by a single-byte selector consumed from the stack.
+    const OP_CHAINCONTEXT = 0xd7;
+    // ---------- Merkle inclusion (NIP-031) ----------
+    // Native Merkle inclusion verifier. Consumes (leaf, scheme_id, proof,
+    // root) and pushes a boolean. Flag off → bad-opcode.
+    const OP_CHECKMERKLEINCLUSION = 0xc1;
     // ---------- Byte manipulation (DePIN-Test) ----------
     const OP_CAT = 0x7e;
     const OP_SPLIT = 0xb7;
@@ -269,16 +300,22 @@ var NeuraiScriptsBundle = (function (exports) {
         OP_9: OP_9,
         OP_ABS: OP_ABS,
         OP_ADD: OP_ADD,
+        OP_BLAKE2B: OP_BLAKE2B,
+        OP_BLAKE3: OP_BLAKE3,
         OP_BOOLAND: OP_BOOLAND,
         OP_BOOLOR: OP_BOOLOR,
         OP_CAT: OP_CAT,
+        OP_CHAINCONTEXT: OP_CHAINCONTEXT,
         OP_CHECKLOCKTIMEVERIFY: OP_CHECKLOCKTIMEVERIFY,
+        OP_CHECKMERKLEINCLUSION: OP_CHECKMERKLEINCLUSION,
         OP_CHECKMULTISIG: OP_CHECKMULTISIG,
         OP_CHECKMULTISIGVERIFY: OP_CHECKMULTISIGVERIFY,
         OP_CHECKSEQUENCEVERIFY: OP_CHECKSEQUENCEVERIFY,
         OP_CHECKSIG: OP_CHECKSIG,
+        OP_CHECKSIGADD: OP_CHECKSIGADD,
         OP_CHECKSIGFROMSTACK: OP_CHECKSIGFROMSTACK,
         OP_CHECKSIGVERIFY: OP_CHECKSIGVERIFY,
+        OP_CHECKSIG_ED25519: OP_CHECKSIG_ED25519,
         OP_CHECKTEMPLATEVERIFY: OP_CHECKTEMPLATEVERIFY,
         OP_CODESEPARATOR: OP_CODESEPARATOR,
         OP_DEPTH: OP_DEPTH,
@@ -299,6 +336,8 @@ var NeuraiScriptsBundle = (function (exports) {
         OP_IFDUP: OP_IFDUP,
         OP_INPUTASSETFIELD: OP_INPUTASSETFIELD,
         OP_INPUTCOUNT: OP_INPUTCOUNT,
+        OP_INPUTVALUE: OP_INPUTVALUE,
+        OP_KECCAK256: OP_KECCAK256,
         OP_LESSTHAN: OP_LESSTHAN,
         OP_LESSTHANOREQUAL: OP_LESSTHANOREQUAL,
         OP_MAX: OP_MAX,
@@ -323,6 +362,7 @@ var NeuraiScriptsBundle = (function (exports) {
         OP_OUTPUTVALUE: OP_OUTPUTVALUE,
         OP_OVER: OP_OVER,
         OP_PICK: OP_PICK,
+        OP_POSEIDON: OP_POSEIDON,
         OP_PUSHDATA1: OP_PUSHDATA1,
         OP_PUSHDATA2: OP_PUSHDATA2,
         OP_PUSHDATA4: OP_PUSHDATA4,
@@ -337,6 +377,8 @@ var NeuraiScriptsBundle = (function (exports) {
         OP_ROT: OP_ROT,
         OP_SHA1: OP_SHA1,
         OP_SHA256: OP_SHA256,
+        OP_SHA3_256: OP_SHA3_256,
+        OP_SHA512: OP_SHA512,
         OP_SIZE: OP_SIZE,
         OP_SPLIT: OP_SPLIT,
         OP_SUB: OP_SUB,
