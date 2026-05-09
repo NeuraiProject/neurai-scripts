@@ -120,6 +120,28 @@ export const OP_CHECKSIGVERIFY = 0xad;
 export const OP_CHECKMULTISIG = 0xae;
 export const OP_CHECKMULTISIGVERIFY = 0xaf;
 
+// ---------- Extended hash opcodes ----------
+// NIP-030: KECCAK256 / BLAKE2B in previously unassigned slots.
+export const OP_KECCAK256 = 0xba;
+export const OP_BLAKE2B = 0xbb;
+// NIP-034a: modern hash opcodes (BLAKE3, SHA3-256, SHA-512).
+// NIP-036: OP_POSEIDON — SNARK-friendly Poseidon hash over the BN254
+// scalar field. Occupies slot 0xc9.
+export const OP_BLAKE3 = 0xc8;
+export const OP_POSEIDON = 0xc9;
+export const OP_SHA3_256 = 0xca;
+export const OP_SHA512 = 0xcb;
+
+// ---------- Extended signature opcodes ----------
+// NIP-035: strict-profile RFC 8032 PureEd25519 verifier in slot 0xdd.
+// Stack contract: (sig64, msg, pubkey32 -- 0|1). Slots 0xd8..0xdc are
+// reserved by NIP-033 (BLS12-381 family), unassigned in current code.
+export const OP_CHECKSIG_ED25519 = 0xdd;
+// NIP-039: generic OP_CHECKSIG-compatible signature accumulator in slot
+// 0xde. Stack contract: (sig, count, pubkey -- count + 0|1). Works with
+// both legacy secp256k1 and PQ ML-DSA-44 keys via CPubKey::Verify().
+export const OP_CHECKSIGADD = 0xde;
+
 // ---------- Expansion / NOPs ----------
 // Only the NOPs not aliased by DePIN-Test opcodes are exported as NOPs.
 //   OP_NOP2 == OP_CHECKLOCKTIMEVERIFY (0xb1)
@@ -165,6 +187,20 @@ export const OP_REFINPUTCOUNT = 0xd4;
 // scriptPubKey. Symmetric to TXFIELD_AUTHSCRIPT_COMMITMENT for inputs;
 // ignores any trailing OP_XNA_ASSET asset wrapper bytes.
 export const OP_OUTPUTAUTHCOMMITMENT = 0xd5;
+
+// ---------- Input value introspection (NIP-024) ----------
+// Pushes the satoshi value of a selected input's spent prevout.
+export const OP_INPUTVALUE = 0xd6;
+
+// ---------- Chain context introspection (NIP-026) ----------
+// Pushes chain-context fields (block height, median time, etc.) selected
+// by a single-byte selector consumed from the stack.
+export const OP_CHAINCONTEXT = 0xd7;
+
+// ---------- Merkle inclusion (NIP-031) ----------
+// Native Merkle inclusion verifier. Consumes (leaf, scheme_id, proof,
+// root) and pushes a boolean. Flag off → bad-opcode.
+export const OP_CHECKMERKLEINCLUSION = 0xc1;
 
 // ---------- Byte manipulation (DePIN-Test) ----------
 export const OP_CAT = 0x7e;
