@@ -11,6 +11,7 @@
 import { bytesEqual, bytesToHex, hexToBytes } from '../../core/bytes.js';
 import { OP_0, OP_1, OP_2, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
 import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt, readPushUint8 } from '../../core/script-parser.js';
+import { assertSameExpiration, readOptionalExpirationGate } from './expiration.js';
 /** Quick discriminator without throwing — useful for indexers. */
 export function isPartialFillScriptPQ(script) {
     const bytes = typeof script === 'string' ? hexToBytes(script) : script;
@@ -46,6 +47,7 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
     expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
     // ═════ Inner IF — Full-fill branch ═════
     expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+    const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
     expectByte(c, OP_0, 'OP_0 (input idx, full)');
     expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
     expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD (full)');
@@ -75,6 +77,7 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
     expectByte(c, OP_1, 'OP_1 (true, full)');
     expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
     // ═════ Inner ELSE — Partial-fill branch ═════
+    const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
     expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
     const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
     expectByte(c, OP_MUL, 'OP_MUL (partial)');
@@ -138,6 +141,7 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
     if (unitPriceSatsFull !== unitPriceSatsPartial) {
         throw new Error('parse-pq: unitPriceSats differs between full-fill and partial-fill branches');
     }
+    assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
     const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
     return {
         network,
@@ -145,6 +149,7 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
         tokenId,
         unitPriceSats: unitPriceSatsFull,
         txHashSelector,
+        expiration: expirationFull,
         paymentScriptPubKey: paymentScriptPubKeyFull,
         scriptHex: bytesToHex(bytes)
     };

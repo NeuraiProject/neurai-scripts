@@ -85,6 +85,16 @@ describe('buildPartialFillScriptPQ', () => {
     expect(hex).toContain('b57cb467');
   });
 
+  it('optionally gates buyer fills by OP_CHAINCONTEXT expiration', () => {
+    const hex = buildPartialFillScriptPQHex({
+      ...baseParams,
+      expiration: { mode: 'height', value: 1000n }
+    });
+    const gate = '02e8030101d7a069';
+    expect(hex).toContain('6763' + gate + '0052cf');
+    expect(hex).toContain('67' + gate + '76' + '0400e1f505');
+  });
+
   it('rejects a non-32-byte commitment', () => {
     expect(() =>
       buildPartialFillScriptPQ({
@@ -159,12 +169,24 @@ describe('parsePartialFillScriptPQ', () => {
     expect(parsed.unitPriceSats).toBe(100_000_000n);
     expect(bytesToHex(parsed.pubKeyCommitment)).toBe('cc'.repeat(32));
     expect(parsed.txHashSelector).toBe(DEFAULT_PQ_TXHASH_SELECTOR);
+    expect(parsed.expiration).toBeUndefined();
     expect(parsed.paymentScriptPubKey.length).toBe(25); // P2PKH
   });
 
   it('round-trips a custom selector', () => {
     const hex = buildPartialFillScriptPQHex({ ...baseParams, txHashSelector: 0x3f });
     expect(parsePartialFillScriptPQ(hex).txHashSelector).toBe(0x3f);
+  });
+
+  it('round-trips an expiration gate', () => {
+    const hex = buildPartialFillScriptPQHex({
+      ...baseParams,
+      expiration: { mode: 'mtp', value: 1_700_000_000n }
+    });
+    expect(parsePartialFillScriptPQ(hex).expiration).toEqual({
+      mode: 'mtp',
+      value: 1_700_000_000n
+    });
   });
 
   it('rejects trailing bytes', () => {

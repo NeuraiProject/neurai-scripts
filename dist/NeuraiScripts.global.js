@@ -222,6 +222,12 @@ var NeuraiScriptsBundle = (function (exports) {
     // Pushes chain-context fields (block height, median time, etc.) selected
     // by a single-byte selector consumed from the stack.
     const OP_CHAINCONTEXT = 0xd7;
+    // ---------- Selectors for OP_CHAINCONTEXT ----------
+    // Valid selector bytes consumed by OP_CHAINCONTEXT. HEIGHT is the candidate
+    // confirmation block height; MTP is the previous block's median time past.
+    const CHAINCONTEXT_HEIGHT = 0x01;
+    const CHAINCONTEXT_MTP = 0x02;
+    const CHAINCONTEXT_CHAIN_ID = 0x03;
     // ---------- Merkle inclusion (NIP-031) ----------
     // Native Merkle inclusion verifier. Consumes (leaf, scheme_id, proof,
     // root) and pushes a boolean. Flag off → bad-opcode.
@@ -271,6 +277,9 @@ var NeuraiScriptsBundle = (function (exports) {
         ASSETFIELD_REISSUABLE: ASSETFIELD_REISSUABLE,
         ASSETFIELD_TYPE: ASSETFIELD_TYPE,
         ASSETFIELD_UNITS: ASSETFIELD_UNITS,
+        CHAINCONTEXT_CHAIN_ID: CHAINCONTEXT_CHAIN_ID,
+        CHAINCONTEXT_HEIGHT: CHAINCONTEXT_HEIGHT,
+        CHAINCONTEXT_MTP: CHAINCONTEXT_MTP,
         OP_0: OP_0,
         OP_0NOTEQUAL: OP_0NOTEQUAL,
         OP_1: OP_1,
@@ -1789,6 +1798,215 @@ var NeuraiScriptsBundle = (function (exports) {
     }
 
     /**
+     * Shared parsing primitives for strict covenant parsers. Each covenant
+     * parser walks the exact byte layout emitted by its builder and fails on
+     * any deviation; the primitives here centralize the cursor arithmetic,
+     * pushdata decoding, and CScriptNum decoding so the legacy and PQ parsers
+     * (and future covenant parsers) cannot drift in rigor.
+     */
+    function makeCursor(bytes) {
+        return { bytes, pos: 0 };
+    }
+    /** Consume one byte and verify it equals `expected`. */
+    function expectByte(c, expected, label) {
+        if (c.pos >= c.bytes.length) {
+            throw new Error(`parse: unexpected end of script while reading ${label}`);
+        }
+        const got = c.bytes[c.pos];
+        if (got !== expected) {
+            throw new Error(`parse: expected ${label} = 0x${expected.toString(16)} at offset ${c.pos}, got 0x${got.toString(16)}`);
+        }
+        c.pos += 1;
+    }
+    /** Fail if the cursor has not consumed every byte of the script. */
+    function assertTrailing(c) {
+        if (c.pos !== c.bytes.length) {
+            throw new Error(`parse: ${c.bytes.length - c.pos} trailing bytes after end of script`);
+        }
+    }
+    /**
+     * Read one pushdata element from the cursor. Supports direct pushes
+     * (1..75 bytes), `OP_PUSHDATA1` and `OP_PUSHDATA2`. `OP_PUSHDATA4` is not
+     * supported by any current covenant script and would overflow the
+     * per-element cap anyway. Truncation is checked for all length fields
+     * and payload ranges.
+     */
+    function readPush(c, label) {
+        if (c.pos >= c.bytes.length) {
+            throw new Error(`parse: unexpected end of script while reading push for ${label}`);
+        }
+        const opcode = c.bytes[c.pos];
+        c.pos += 1;
+        // Short direct push: 1..75 bytes
+        if (opcode >= 0x01 && opcode <= 0x4b) {
+            const len = opcode;
+            if (c.pos + len > c.bytes.length) {
+                throw new Error(`parse: short push of ${len} bytes exceeds script length at ${label}`);
+            }
+            const data = c.bytes.slice(c.pos, c.pos + len);
+            c.pos += len;
+            return data;
+        }
+        // OP_PUSHDATA1
+        if (opcode === 0x4c) {
+            if (c.pos >= c.bytes.length) {
+                throw new Error(`parse: truncated PUSHDATA1 length at ${label}`);
+            }
+            const len = c.bytes[c.pos];
+            c.pos += 1;
+            if (c.pos + len > c.bytes.length) {
+                throw new Error(`parse: PUSHDATA1 of ${len} bytes exceeds script length at ${label}`);
+            }
+            const data = c.bytes.slice(c.pos, c.pos + len);
+            c.pos += len;
+            return data;
+        }
+        // OP_PUSHDATA2
+        if (opcode === 0x4d) {
+            if (c.pos + 2 > c.bytes.length) {
+                throw new Error(`parse: truncated PUSHDATA2 length at ${label}`);
+            }
+            const len = c.bytes[c.pos] | (c.bytes[c.pos + 1] << 8);
+            c.pos += 2;
+            if (c.pos + len > c.bytes.length) {
+                throw new Error(`parse: PUSHDATA2 of ${len} bytes exceeds script length at ${label}`);
+            }
+            const data = c.bytes.slice(c.pos, c.pos + len);
+            c.pos += len;
+            return data;
+        }
+        throw new Error(`parse: expected a pushdata opcode at ${label}, got 0x${opcode.toString(16)} at offset ${c.pos - 1}`);
+    }
+    /**
+     * Decode a `CScriptNum` byte vector (little-endian sign-magnitude, up to
+     * 8 bytes) into a BigInt. Empty vector encodes 0.
+     */
+    function decodeScriptNum(data, label) {
+        if (data.length === 0)
+            return 0n;
+        if (data.length > 8) {
+            throw new Error(`parse: CScriptNum at ${label} exceeds 8 bytes`);
+        }
+        let n = 0n;
+        for (let i = 0; i < data.length - 1; i += 1) {
+            n |= BigInt(data[i]) << BigInt(8 * i);
+        }
+        const last = data[data.length - 1];
+        n |= BigInt(last & 0x7f) << BigInt(8 * (data.length - 1));
+        if (last & 0x80) {
+            n = -n;
+        }
+        return n;
+    }
+    /**
+     * Read a push as a non-negative CScriptNum. Recognises OP_1..OP_16
+     * shorthand. `OP_0` is not accepted because the covenant callers use this
+     * only for values that are strictly positive (prices, selectors, indices).
+     */
+    function readPushPositiveInt(c, label) {
+        if (c.pos >= c.bytes.length) {
+            throw new Error(`parse: end of script at ${label}`);
+        }
+        const opcode = c.bytes[c.pos];
+        if (opcode >= OP_1 && opcode <= 0x60) {
+            c.pos += 1;
+            return BigInt(opcode - OP_1 + 1);
+        }
+        const data = readPush(c, label);
+        return decodeScriptNum(data, label);
+    }
+    /**
+     * Read a 1-byte selector as an UNSIGNED 8-bit integer (0..255). Accepts
+     * two on-wire encodings, because old vs new covenant builders differ:
+     *   - `OP_1..OP_16` shorthand (single opcode) → values 1..16.
+     *   - `0x01 <byte>` raw 1-byte push → any value 1..255.
+     *
+     * Values 0x80..0xff MUST use the raw-push form; the CScriptNum encoding
+     * would need a 0x00 padding byte and become 2 bytes on-stack, which
+     * consensus `OP_TXHASH` rejects. The builder in `script-pq.ts` emits the
+     * raw-push form unconditionally; the parser stays lenient so covenants
+     * built by older tools (using OP_N for small values) still round-trip.
+     */
+    function readPushUint8(c, label) {
+        if (c.pos >= c.bytes.length) {
+            throw new Error(`parse: end of script at ${label}`);
+        }
+        const opcode = c.bytes[c.pos];
+        if (opcode >= OP_1 && opcode <= 0x60) {
+            c.pos += 1;
+            return opcode - OP_1 + 1;
+        }
+        const data = readPush(c, label);
+        if (data.length !== 1) {
+            throw new Error(`parse: ${label} must be a single-byte push, got ${data.length} bytes`);
+        }
+        return data[0];
+    }
+
+    const MAX_INT64 = 0x7fffffffffffffffn;
+    function selectorForMode(mode) {
+        if (mode === 'height')
+            return CHAINCONTEXT_HEIGHT;
+        if (mode === 'mtp')
+            return CHAINCONTEXT_MTP;
+        throw new Error('expiration.mode must be "height" or "mtp"');
+    }
+    function modeForSelector(selector) {
+        if (selector === CHAINCONTEXT_HEIGHT)
+            return 'height';
+        if (selector === CHAINCONTEXT_MTP)
+            return 'mtp';
+        throw new Error('expiration OP_CHAINCONTEXT selector must be HEIGHT (0x01) or MTP (0x02)');
+    }
+    function assertExpiration(expiration) {
+        if (expiration === undefined)
+            return undefined;
+        if (expiration === null || typeof expiration !== 'object') {
+            throw new Error('expiration must be an object');
+        }
+        selectorForMode(expiration.mode);
+        if (typeof expiration.value !== 'bigint') {
+            throw new Error('expiration.value must be a bigint');
+        }
+        if (expiration.value <= 0n) {
+            throw new Error('expiration.value must be > 0');
+        }
+        if (expiration.value > MAX_INT64) {
+            throw new Error('expiration.value exceeds int64 range');
+        }
+        return expiration;
+    }
+    function appendExpirationGate(b, expiration) {
+        if (!expiration)
+            return;
+        b.pushInt(expiration.value)
+            .pushBytes(Uint8Array.of(selectorForMode(expiration.mode)))
+            .op(OP_CHAINCONTEXT, OP_GREATERTHAN, OP_VERIFY);
+    }
+    function readOptionalExpirationGate(c, nextOpcodeWithoutGate, label) {
+        if (c.pos >= c.bytes.length || c.bytes[c.pos] === nextOpcodeWithoutGate) {
+            return undefined;
+        }
+        const value = readPushPositiveInt(c, `expiration value (${label})`);
+        if (value <= 0n) {
+            throw new Error(`parse: expiration value (${label}) must be > 0`);
+        }
+        const selector = readPushUint8(c, `expiration selector (${label})`);
+        const mode = modeForSelector(selector);
+        expectByte(c, OP_CHAINCONTEXT, `OP_CHAINCONTEXT (${label})`);
+        expectByte(c, OP_GREATERTHAN, `OP_GREATERTHAN (${label})`);
+        expectByte(c, OP_VERIFY, `OP_VERIFY (${label})`);
+        return { mode, value };
+    }
+    function assertSameExpiration(a, b, label) {
+        if (a === undefined && b === undefined)
+            return;
+        if (a === undefined || b === undefined || a.mode !== b.mode || a.value !== b.value) {
+            throw new Error(`parse: expiration differs between ${label}`);
+        }
+    }
+
+    /**
      * Partial-Fill Sell Order covenant script (three-branch).
      *
      * The covenant has three branches selected by the top of the unlock stack:
@@ -1873,6 +2091,7 @@ var NeuraiScriptsBundle = (function (exports) {
         const sellerPubKeyHash = decodeSellerAddress(sellerAddress);
         assertTokenId$1(tokenId);
         assertPrice$1(unitPriceSats);
+        const expiration = assertExpiration(params.expiration);
         const sellerScriptPubKey = encodeP2PKHScriptPubKey(sellerPubKeyHash);
         const tokenIdBytes = new TextEncoder().encode(tokenId);
         const b = new ScriptBuilder();
@@ -1893,6 +2112,7 @@ var NeuraiScriptsBundle = (function (exports) {
         // push N. The entire covenant is drained to vout[1]; no vout[2] is
         // constrained and none is required (consensus forbids zero-amount asset
         // transfers, so the partial-fill continuity check is simply skipped).
+        appendExpirationGate(b, expiration);
         // 1. N = inputAmount
         b.pushInt(0)
             .pushInt(ASSETFIELD_AMOUNT)
@@ -1929,6 +2149,7 @@ var NeuraiScriptsBundle = (function (exports) {
         // scriptSig: <N> <0> <0>   ( N, full-flag=0, cancel-flag=0 )
         // Stack entering: [ N ]
         b.op(OP_ELSE);
+        appendExpirationGate(b, expiration);
         // 1. Payment value (output 0) >= N * unitPriceSats
         b.op(OP_DUP) // [ N, N ]
             .pushInt(unitPriceSats) // [ N, N, price ]
@@ -2063,6 +2284,7 @@ var NeuraiScriptsBundle = (function (exports) {
         assertTokenId(tokenId);
         assertPrice(unitPriceSats);
         assertSelector(txHashSelector);
+        const expiration = assertExpiration(params.expiration);
         const payment = encodeSellerScriptPubKey(paymentAddress);
         const tokenIdBytes = new TextEncoder().encode(tokenId);
         const b = new ScriptBuilder();
@@ -2090,6 +2312,7 @@ var NeuraiScriptsBundle = (function (exports) {
         // scriptSig: <1> <0>
         // Stack entering: [ ]
         // 1. N = inputAmount
+        appendExpirationGate(b, expiration);
         b.pushInt(0)
             .pushInt(ASSETFIELD_AMOUNT)
             .op(OP_INPUTASSETFIELD);
@@ -2124,6 +2347,7 @@ var NeuraiScriptsBundle = (function (exports) {
         // scriptSig: <N> <0> <0>
         // Stack entering: [ N ]
         b.op(OP_ELSE);
+        appendExpirationGate(b, expiration);
         // 1. Payment value (output 0) >= N * unitPriceSats
         b.op(OP_DUP)
             .pushInt(unitPriceSats)
@@ -2314,152 +2538,6 @@ var NeuraiScriptsBundle = (function (exports) {
     }
 
     /**
-     * Shared parsing primitives for strict covenant parsers. Each covenant
-     * parser walks the exact byte layout emitted by its builder and fails on
-     * any deviation; the primitives here centralize the cursor arithmetic,
-     * pushdata decoding, and CScriptNum decoding so the legacy and PQ parsers
-     * (and future covenant parsers) cannot drift in rigor.
-     */
-    function makeCursor(bytes) {
-        return { bytes, pos: 0 };
-    }
-    /** Consume one byte and verify it equals `expected`. */
-    function expectByte(c, expected, label) {
-        if (c.pos >= c.bytes.length) {
-            throw new Error(`parse: unexpected end of script while reading ${label}`);
-        }
-        const got = c.bytes[c.pos];
-        if (got !== expected) {
-            throw new Error(`parse: expected ${label} = 0x${expected.toString(16)} at offset ${c.pos}, got 0x${got.toString(16)}`);
-        }
-        c.pos += 1;
-    }
-    /** Fail if the cursor has not consumed every byte of the script. */
-    function assertTrailing(c) {
-        if (c.pos !== c.bytes.length) {
-            throw new Error(`parse: ${c.bytes.length - c.pos} trailing bytes after end of script`);
-        }
-    }
-    /**
-     * Read one pushdata element from the cursor. Supports direct pushes
-     * (1..75 bytes), `OP_PUSHDATA1` and `OP_PUSHDATA2`. `OP_PUSHDATA4` is not
-     * supported by any current covenant script and would overflow the
-     * per-element cap anyway. Truncation is checked for all length fields
-     * and payload ranges.
-     */
-    function readPush(c, label) {
-        if (c.pos >= c.bytes.length) {
-            throw new Error(`parse: unexpected end of script while reading push for ${label}`);
-        }
-        const opcode = c.bytes[c.pos];
-        c.pos += 1;
-        // Short direct push: 1..75 bytes
-        if (opcode >= 0x01 && opcode <= 0x4b) {
-            const len = opcode;
-            if (c.pos + len > c.bytes.length) {
-                throw new Error(`parse: short push of ${len} bytes exceeds script length at ${label}`);
-            }
-            const data = c.bytes.slice(c.pos, c.pos + len);
-            c.pos += len;
-            return data;
-        }
-        // OP_PUSHDATA1
-        if (opcode === 0x4c) {
-            if (c.pos >= c.bytes.length) {
-                throw new Error(`parse: truncated PUSHDATA1 length at ${label}`);
-            }
-            const len = c.bytes[c.pos];
-            c.pos += 1;
-            if (c.pos + len > c.bytes.length) {
-                throw new Error(`parse: PUSHDATA1 of ${len} bytes exceeds script length at ${label}`);
-            }
-            const data = c.bytes.slice(c.pos, c.pos + len);
-            c.pos += len;
-            return data;
-        }
-        // OP_PUSHDATA2
-        if (opcode === 0x4d) {
-            if (c.pos + 2 > c.bytes.length) {
-                throw new Error(`parse: truncated PUSHDATA2 length at ${label}`);
-            }
-            const len = c.bytes[c.pos] | (c.bytes[c.pos + 1] << 8);
-            c.pos += 2;
-            if (c.pos + len > c.bytes.length) {
-                throw new Error(`parse: PUSHDATA2 of ${len} bytes exceeds script length at ${label}`);
-            }
-            const data = c.bytes.slice(c.pos, c.pos + len);
-            c.pos += len;
-            return data;
-        }
-        throw new Error(`parse: expected a pushdata opcode at ${label}, got 0x${opcode.toString(16)} at offset ${c.pos - 1}`);
-    }
-    /**
-     * Decode a `CScriptNum` byte vector (little-endian sign-magnitude, up to
-     * 8 bytes) into a BigInt. Empty vector encodes 0.
-     */
-    function decodeScriptNum(data, label) {
-        if (data.length === 0)
-            return 0n;
-        if (data.length > 8) {
-            throw new Error(`parse: CScriptNum at ${label} exceeds 8 bytes`);
-        }
-        let n = 0n;
-        for (let i = 0; i < data.length - 1; i += 1) {
-            n |= BigInt(data[i]) << BigInt(8 * i);
-        }
-        const last = data[data.length - 1];
-        n |= BigInt(last & 0x7f) << BigInt(8 * (data.length - 1));
-        if (last & 0x80) {
-            n = -n;
-        }
-        return n;
-    }
-    /**
-     * Read a push as a non-negative CScriptNum. Recognises OP_1..OP_16
-     * shorthand. `OP_0` is not accepted because the covenant callers use this
-     * only for values that are strictly positive (prices, selectors, indices).
-     */
-    function readPushPositiveInt(c, label) {
-        if (c.pos >= c.bytes.length) {
-            throw new Error(`parse: end of script at ${label}`);
-        }
-        const opcode = c.bytes[c.pos];
-        if (opcode >= OP_1 && opcode <= 0x60) {
-            c.pos += 1;
-            return BigInt(opcode - OP_1 + 1);
-        }
-        const data = readPush(c, label);
-        return decodeScriptNum(data, label);
-    }
-    /**
-     * Read a 1-byte selector as an UNSIGNED 8-bit integer (0..255). Accepts
-     * two on-wire encodings, because old vs new covenant builders differ:
-     *   - `OP_1..OP_16` shorthand (single opcode) → values 1..16.
-     *   - `0x01 <byte>` raw 1-byte push → any value 1..255.
-     *
-     * Values 0x80..0xff MUST use the raw-push form; the CScriptNum encoding
-     * would need a 0x00 padding byte and become 2 bytes on-stack, which
-     * consensus `OP_TXHASH` rejects. The builder in `script-pq.ts` emits the
-     * raw-push form unconditionally; the parser stays lenient so covenants
-     * built by older tools (using OP_N for small values) still round-trip.
-     */
-    function readPushUint8(c, label) {
-        if (c.pos >= c.bytes.length) {
-            throw new Error(`parse: end of script at ${label}`);
-        }
-        const opcode = c.bytes[c.pos];
-        if (opcode >= OP_1 && opcode <= 0x60) {
-            c.pos += 1;
-            return opcode - OP_1 + 1;
-        }
-        const data = readPush(c, label);
-        if (data.length !== 1) {
-            throw new Error(`parse: ${label} must be a single-byte push, got ${data.length} bytes`);
-        }
-        return data[0];
-    }
-
-    /**
      * Parser for the Partial-Fill Sell Order covenant (three-branch).
      *
      * Extracts `(sellerPubKeyHash, unitPriceSats, tokenId)` from a scriptPubKey
@@ -2492,6 +2570,7 @@ var NeuraiScriptsBundle = (function (exports) {
         expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
         // ═════ Inner IF — Full-fill branch ═════
         expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+        const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
         // N = inputAmount
         expectByte(c, OP_0, 'OP_0 (input idx, full)');
         expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
@@ -2533,6 +2612,7 @@ var NeuraiScriptsBundle = (function (exports) {
         expectByte(c, OP_1, 'OP_1 (true, full)');
         expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
         // ═════ Inner ELSE — Partial-fill branch ═════
+        const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
         // Payment value
         expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
         const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
@@ -2603,12 +2683,14 @@ var NeuraiScriptsBundle = (function (exports) {
         if (unitPriceSatsFull !== unitPriceSatsPartial) {
             throw new Error('parse: unitPriceSats differs between full-fill and partial-fill branches');
         }
+        assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
         const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
         return {
             network,
             sellerPubKeyHash,
             unitPriceSats: unitPriceSatsFull,
             tokenId,
+            expiration: expirationFull,
             scriptHex: bytesToHex(bytes)
         };
     }
@@ -2658,6 +2740,7 @@ var NeuraiScriptsBundle = (function (exports) {
         expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
         // ═════ Inner IF — Full-fill branch ═════
         expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+        const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
         expectByte(c, OP_0, 'OP_0 (input idx, full)');
         expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
         expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD (full)');
@@ -2687,6 +2770,7 @@ var NeuraiScriptsBundle = (function (exports) {
         expectByte(c, OP_1, 'OP_1 (true, full)');
         expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
         // ═════ Inner ELSE — Partial-fill branch ═════
+        const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
         expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
         const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
         expectByte(c, OP_MUL, 'OP_MUL (partial)');
@@ -2748,6 +2832,7 @@ var NeuraiScriptsBundle = (function (exports) {
         if (unitPriceSatsFull !== unitPriceSatsPartial) {
             throw new Error('parse-pq: unitPriceSats differs between full-fill and partial-fill branches');
         }
+        assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
         const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
         return {
             network,
@@ -2755,6 +2840,7 @@ var NeuraiScriptsBundle = (function (exports) {
             tokenId,
             unitPriceSats: unitPriceSatsFull,
             txHashSelector,
+            expiration: expirationFull,
             paymentScriptPubKey: paymentScriptPubKeyFull,
             scriptHex: bytesToHex(bytes)
         };

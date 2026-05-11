@@ -87,6 +87,26 @@ describe('buildPartialFillScript', () => {
     expect(buildPartialFillScriptHex(baseParams)).toBe(EXPECTED_SCRIPT_HEX);
   });
 
+  it('optionally gates buyer fills by block height expiration', () => {
+    const hex = buildPartialFillScriptHex({
+      ...baseParams,
+      expiration: { mode: 'height', value: 1000n }
+    });
+    const gate = '02e8030101d7a069';
+    expect(hex).toContain('6763' + gate + '0052cf');
+    expect(hex).toContain('67' + gate + '76' + '0400e1f505');
+  });
+
+  it('optionally gates buyer fills by MTP expiration', () => {
+    const hex = buildPartialFillScriptHex({
+      ...baseParams,
+      expiration: { mode: 'mtp', value: 1_700_000_000n }
+    });
+    const gate = '0400f153650102d7a069';
+    expect(hex).toContain('6763' + gate + '0052cf');
+    expect(hex).toContain('67' + gate + '76' + '0400e1f505');
+  });
+
   it('rejects an empty sellerAddress', () => {
     expect(() =>
       buildPartialFillScript({ ...baseParams, sellerAddress: '' })
@@ -118,6 +138,12 @@ describe('buildPartialFillScript', () => {
     ).toThrow(/> 0/);
   });
 
+  it('rejects an invalid expiration', () => {
+    expect(() =>
+      buildPartialFillScript({ ...baseParams, expiration: { mode: 'height', value: 0n } })
+    ).toThrow(/expiration.value must be > 0/);
+  });
+
   it('produces the same script shape for two sellers with different PKHs', () => {
     const otherAddress = testnetP2PKHAddress(new Uint8Array(20).fill(0xbb));
     const a = buildPartialFillScript(baseParams);
@@ -141,7 +167,19 @@ describe('parsePartialFillScript', () => {
     expect(parsed.tokenId).toBe('CAT');
     expect(parsed.unitPriceSats).toBe(100_000_000n);
     expect(bytesToHex(parsed.sellerPubKeyHash)).toBe('aa'.repeat(20));
+    expect(parsed.expiration).toBeUndefined();
     expect((parsed as Record<string, unknown>).sellerAddress).toBeUndefined();
+  });
+
+  it('round-trips an expiration gate', () => {
+    const hex = buildPartialFillScriptHex({
+      ...baseParams,
+      expiration: { mode: 'height', value: 1000n }
+    });
+    const parsed = parsePartialFillScript(hex, 'xna-test');
+    expect(parsed.expiration).toEqual({ mode: 'height', value: 1000n });
+    expect(parsed.tokenId).toBe('CAT');
+    expect(parsed.unitPriceSats).toBe(100_000_000n);
   });
 
   it('round-trips with a non-OP_N price', () => {

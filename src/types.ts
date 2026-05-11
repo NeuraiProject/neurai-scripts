@@ -25,6 +25,24 @@
  */
 export type Network = 'xna' | 'xna-test';
 
+export type PartialFillExpirationMode = 'height' | 'mtp';
+
+export interface PartialFillExpiration {
+  /**
+   * Chain context used to decide whether the sale is still active.
+   *
+   * - `height`: compare against the candidate block height.
+   * - `mtp`: compare against the previous block's median time past.
+   */
+  mode: PartialFillExpirationMode;
+  /**
+   * Expiry boundary. Fills are valid only while `value > chainContext`.
+   * At exactly this height / MTP, and after it, only the seller cancel branch
+   * can spend the order.
+   */
+  value: bigint;
+}
+
 export interface PartialFillOrderParams {
   /**
    * Seller destination. Must be a legacy P2PKH address (base58check,
@@ -48,6 +66,13 @@ export interface PartialFillOrderParams {
    * means `unitPriceSats = 100_000_000n`.
    */
   unitPriceSats: bigint;
+
+  /**
+   * Optional sale expiry enforced with OP_CHAINCONTEXT. When set, both buyer
+   * fill branches require `expiration.value > current height/MTP`. The seller
+   * cancel branch remains available to recover the order.
+   */
+  expiration?: PartialFillExpiration;
 }
 
 export interface ParsedPartialFillOrder {
@@ -63,6 +88,8 @@ export interface ParsedPartialFillOrder {
   tokenId: string;
   /** Unit price parsed from the covenant, in XNA satoshis. */
   unitPriceSats: bigint;
+  /** Optional sale expiry parsed from OP_CHAINCONTEXT gates. */
+  expiration?: PartialFillExpiration;
   /** Script hex the parser was fed. */
   scriptHex: string;
 }
@@ -117,6 +144,11 @@ export interface PartialFillOrderPQParams {
    * `doc/new-opcodes-depin-branch.md` §2.1 for the bit → field mapping.
    */
   txHashSelector?: number;
+  /**
+   * Optional sale expiry enforced with OP_CHAINCONTEXT. When set, both buyer
+   * fill branches require `expiration.value > current height/MTP`.
+   */
+  expiration?: PartialFillExpiration;
 }
 
 export interface ParsedPartialFillOrderPQ

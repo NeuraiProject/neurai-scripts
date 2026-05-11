@@ -176,6 +176,12 @@ export const OP_INPUTVALUE = 0xd6;
 // Pushes chain-context fields (block height, median time, etc.) selected
 // by a single-byte selector consumed from the stack.
 export const OP_CHAINCONTEXT = 0xd7;
+// ---------- Selectors for OP_CHAINCONTEXT ----------
+// Valid selector bytes consumed by OP_CHAINCONTEXT. HEIGHT is the candidate
+// confirmation block height; MTP is the previous block's median time past.
+export const CHAINCONTEXT_HEIGHT = 0x01;
+export const CHAINCONTEXT_MTP = 0x02;
+export const CHAINCONTEXT_CHAIN_ID = 0x03;
 // ---------- Merkle inclusion (NIP-031) ----------
 // Native Merkle inclusion verifier. Consumes (leaf, scheme_id, proof,
 // root) and pushes a boolean. Flag off → bad-opcode.

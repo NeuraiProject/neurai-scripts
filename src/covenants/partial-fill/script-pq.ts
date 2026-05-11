@@ -56,6 +56,7 @@ import {
 } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
 import type { PartialFillOrderPQParams } from '../../types.js';
+import { appendExpirationGate, assertExpiration } from './expiration.js';
 
 const ASSET_NAME_MAX = 32;
 export const DEFAULT_PQ_TXHASH_SELECTOR = 0xff;
@@ -115,6 +116,7 @@ export function buildPartialFillScriptPQ(params: PartialFillOrderPQParams): Uint
   assertTokenId(tokenId);
   assertPrice(unitPriceSats);
   assertSelector(txHashSelector);
+  const expiration = assertExpiration(params.expiration);
 
   const payment = encodeSellerScriptPubKey(paymentAddress);
   const tokenIdBytes = new TextEncoder().encode(tokenId);
@@ -148,6 +150,8 @@ export function buildPartialFillScriptPQ(params: PartialFillOrderPQParams): Uint
   // Stack entering: [ ]
 
   // 1. N = inputAmount
+  appendExpirationGate(b, expiration);
+
   b.pushInt(0)
     .pushInt(ASSETFIELD_AMOUNT)
     .op(OP_INPUTASSETFIELD);
@@ -188,6 +192,7 @@ export function buildPartialFillScriptPQ(params: PartialFillOrderPQParams): Uint
   // scriptSig: <N> <0> <0>
   // Stack entering: [ N ]
   b.op(OP_ELSE);
+  appendExpirationGate(b, expiration);
 
   // 1. Payment value (output 0) >= N * unitPriceSats
   b.op(OP_DUP)

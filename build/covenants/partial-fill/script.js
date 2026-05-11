@@ -41,6 +41,7 @@ import { bytesToHex } from '../../core/bytes.js';
 import { encodeP2PKHScriptPubKey } from '../../standard/p2pkh.js';
 import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_CHECKSIG, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_HASH160, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SUB, OP_SWAP, OP_TXFIELD, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
+import { appendExpirationGate, assertExpiration } from './expiration.js';
 export { encodeP2PKHScriptPubKey } from '../../standard/p2pkh.js';
 const ASSET_NAME_MAX = 32;
 function decodeSellerAddress(sellerAddress) {
@@ -89,6 +90,7 @@ export function buildPartialFillScript(params) {
     const sellerPubKeyHash = decodeSellerAddress(sellerAddress);
     assertTokenId(tokenId);
     assertPrice(unitPriceSats);
+    const expiration = assertExpiration(params.expiration);
     const sellerScriptPubKey = encodeP2PKHScriptPubKey(sellerPubKeyHash);
     const tokenIdBytes = new TextEncoder().encode(tokenId);
     const b = new ScriptBuilder();
@@ -109,6 +111,7 @@ export function buildPartialFillScript(params) {
     // push N. The entire covenant is drained to vout[1]; no vout[2] is
     // constrained and none is required (consensus forbids zero-amount asset
     // transfers, so the partial-fill continuity check is simply skipped).
+    appendExpirationGate(b, expiration);
     // 1. N = inputAmount
     b.pushInt(0)
         .pushInt(ASSETFIELD_AMOUNT)
@@ -145,6 +148,7 @@ export function buildPartialFillScript(params) {
     // scriptSig: <N> <0> <0>   ( N, full-flag=0, cancel-flag=0 )
     // Stack entering: [ N ]
     b.op(OP_ELSE);
+    appendExpirationGate(b, expiration);
     // 1. Payment value (output 0) >= N * unitPriceSats
     b.op(OP_DUP) // [ N, N ]
         .pushInt(unitPriceSats) // [ N, N, price ]

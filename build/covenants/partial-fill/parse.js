@@ -14,6 +14,7 @@
 import { bytesEqual, bytesToHex, hexToBytes } from '../../core/bytes.js';
 import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_0, OP_1, OP_2, OP_CHECKSIG, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_HASH160, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SUB, OP_SWAP, OP_TXFIELD, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
 import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt } from '../../core/script-parser.js';
+import { assertSameExpiration, readOptionalExpirationGate } from './expiration.js';
 /**
  * Parse a covenant scriptPubKey and extract its parameters. Throws with a
  * descriptive message if the bytes don't match the partial-fill template.
@@ -34,6 +35,7 @@ export function parsePartialFillScript(script, network = 'xna-test') {
     expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
     // ═════ Inner IF — Full-fill branch ═════
     expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+    const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
     // N = inputAmount
     expectByte(c, OP_0, 'OP_0 (input idx, full)');
     expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
@@ -79,6 +81,7 @@ export function parsePartialFillScript(script, network = 'xna-test') {
     expectByte(c, OP_1, 'OP_1 (true, full)');
     expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
     // ═════ Inner ELSE — Partial-fill branch ═════
+    const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
     // Payment value
     expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
     const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
@@ -151,12 +154,14 @@ export function parsePartialFillScript(script, network = 'xna-test') {
     if (unitPriceSatsFull !== unitPriceSatsPartial) {
         throw new Error('parse: unitPriceSats differs between full-fill and partial-fill branches');
     }
+    assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
     const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
     return {
         network,
         sellerPubKeyHash,
         unitPriceSats: unitPriceSatsFull,
         tokenId,
+        expiration: expirationFull,
         scriptHex: bytesToHex(bytes)
     };
 }

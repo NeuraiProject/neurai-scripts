@@ -1,4 +1,4 @@
-export type { Network, OrderUtxo, ParsedPartialFillOrder, ParsedPartialFillOrderPQ, PartialFillOrderParams, PartialFillOrderPQParams, TxInputRef } from './types.js';
+export type { Network, OrderUtxo, ParsedPartialFillOrder, ParsedPartialFillOrderPQ, PartialFillExpiration, PartialFillExpirationMode, PartialFillOrderParams, PartialFillOrderPQParams, TxInputRef } from './types.js';
 export { bytesToHex, hexToBytes, concatBytes, bytesEqual, ensureHex } from './core/bytes.js';
 export { ScriptBuilder, encodeScriptNum, pushBytes, pushInt, pushHex } from './core/script-builder.js';
 export * as opcodes from './core/opcodes.js';

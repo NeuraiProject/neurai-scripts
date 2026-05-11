@@ -3,6 +3,8 @@ export type {
   OrderUtxo,
   ParsedPartialFillOrder,
   ParsedPartialFillOrderPQ,
+  PartialFillExpiration,
+  PartialFillExpirationMode,
   PartialFillOrderParams,
   PartialFillOrderPQParams,
   TxInputRef

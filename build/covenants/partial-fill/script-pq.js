@@ -29,6 +29,7 @@ import { bytesToHex } from '../../core/bytes.js';
 import { encodeSellerScriptPubKey } from '../../address.js';
 import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
+import { appendExpirationGate, assertExpiration } from './expiration.js';
 const ASSET_NAME_MAX = 32;
 export const DEFAULT_PQ_TXHASH_SELECTOR = 0xff;
 function assertCommitment(commitment) {
@@ -75,6 +76,7 @@ export function buildPartialFillScriptPQ(params) {
     assertTokenId(tokenId);
     assertPrice(unitPriceSats);
     assertSelector(txHashSelector);
+    const expiration = assertExpiration(params.expiration);
     const payment = encodeSellerScriptPubKey(paymentAddress);
     const tokenIdBytes = new TextEncoder().encode(tokenId);
     const b = new ScriptBuilder();
@@ -102,6 +104,7 @@ export function buildPartialFillScriptPQ(params) {
     // scriptSig: <1> <0>
     // Stack entering: [ ]
     // 1. N = inputAmount
+    appendExpirationGate(b, expiration);
     b.pushInt(0)
         .pushInt(ASSETFIELD_AMOUNT)
         .op(OP_INPUTASSETFIELD);
@@ -136,6 +139,7 @@ export function buildPartialFillScriptPQ(params) {
     // scriptSig: <N> <0> <0>
     // Stack entering: [ N ]
     b.op(OP_ELSE);
+    appendExpirationGate(b, expiration);
     // 1. Payment value (output 0) >= N * unitPriceSats
     b.op(OP_DUP)
         .pushInt(unitPriceSats)

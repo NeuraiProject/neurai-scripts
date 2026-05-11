@@ -67,6 +67,7 @@ import {
 } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
 import type { PartialFillOrderParams } from '../../types.js';
+import { appendExpirationGate, assertExpiration } from './expiration.js';
 
 export { encodeP2PKHScriptPubKey } from '../../standard/p2pkh.js';
 
@@ -125,6 +126,7 @@ export function buildPartialFillScript(params: PartialFillOrderParams): Uint8Arr
   const sellerPubKeyHash = decodeSellerAddress(sellerAddress);
   assertTokenId(tokenId);
   assertPrice(unitPriceSats);
+  const expiration = assertExpiration(params.expiration);
 
   const sellerScriptPubKey = encodeP2PKHScriptPubKey(sellerPubKeyHash);
   const tokenIdBytes = new TextEncoder().encode(tokenId);
@@ -150,6 +152,7 @@ export function buildPartialFillScript(params: PartialFillOrderParams): Uint8Arr
   // push N. The entire covenant is drained to vout[1]; no vout[2] is
   // constrained and none is required (consensus forbids zero-amount asset
   // transfers, so the partial-fill continuity check is simply skipped).
+  appendExpirationGate(b, expiration);
 
   // 1. N = inputAmount
   b.pushInt(0)
@@ -193,6 +196,7 @@ export function buildPartialFillScript(params: PartialFillOrderParams): Uint8Arr
   // scriptSig: <N> <0> <0>   ( N, full-flag=0, cancel-flag=0 )
   // Stack entering: [ N ]
   b.op(OP_ELSE);
+  appendExpirationGate(b, expiration);
 
   // 1. Payment value (output 0) >= N * unitPriceSats
   b.op(OP_DUP)              // [ N, N ]

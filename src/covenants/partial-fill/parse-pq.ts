@@ -46,6 +46,10 @@ import {
   readPushUint8
 } from '../../core/script-parser.js';
 import type { Network, ParsedPartialFillOrderPQ } from '../../types.js';
+import {
+  assertSameExpiration,
+  readOptionalExpirationGate
+} from './expiration.js';
 
 /** Quick discriminator without throwing — useful for indexers. */
 export function isPartialFillScriptPQ(script: Uint8Array | string): boolean {
@@ -90,6 +94,7 @@ export function parsePartialFillScriptPQ(
 
   // ═════ Inner IF — Full-fill branch ═════
   expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+  const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
 
   expectByte(c, OP_0, 'OP_0 (input idx, full)');
   expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
@@ -127,6 +132,7 @@ export function parsePartialFillScriptPQ(
   expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
 
   // ═════ Inner ELSE — Partial-fill branch ═════
+  const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
   expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
   const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
   expectByte(c, OP_MUL, 'OP_MUL (partial)');
@@ -198,6 +204,7 @@ export function parsePartialFillScriptPQ(
   if (unitPriceSatsFull !== unitPriceSatsPartial) {
     throw new Error('parse-pq: unitPriceSats differs between full-fill and partial-fill branches');
   }
+  assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
 
   const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
 
@@ -207,6 +214,7 @@ export function parsePartialFillScriptPQ(
     tokenId,
     unitPriceSats: unitPriceSatsFull,
     txHashSelector,
+    expiration: expirationFull,
     paymentScriptPubKey: paymentScriptPubKeyFull,
     scriptHex: bytesToHex(bytes)
   };

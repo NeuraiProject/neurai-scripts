@@ -49,6 +49,10 @@ import {
   readPushPositiveInt
 } from '../../core/script-parser.js';
 import type { Network, ParsedPartialFillOrder } from '../../types.js';
+import {
+  assertSameExpiration,
+  readOptionalExpirationGate
+} from './expiration.js';
 
 /**
  * Parse a covenant scriptPubKey and extract its parameters. Throws with a
@@ -75,6 +79,7 @@ export function parsePartialFillScript(
 
   // ═════ Inner IF — Full-fill branch ═════
   expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
+  const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
 
   // N = inputAmount
   expectByte(c, OP_0, 'OP_0 (input idx, full)');
@@ -126,6 +131,7 @@ export function parsePartialFillScript(
   expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
 
   // ═════ Inner ELSE — Partial-fill branch ═════
+  const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
   // Payment value
   expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
   const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
@@ -206,6 +212,7 @@ export function parsePartialFillScript(
   if (unitPriceSatsFull !== unitPriceSatsPartial) {
     throw new Error('parse: unitPriceSats differs between full-fill and partial-fill branches');
   }
+  assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
   const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
 
   return {
@@ -213,6 +220,7 @@ export function parsePartialFillScript(
     sellerPubKeyHash,
     unitPriceSats: unitPriceSatsFull,
     tokenId,
+    expiration: expirationFull,
     scriptHex: bytesToHex(bytes)
   };
 }

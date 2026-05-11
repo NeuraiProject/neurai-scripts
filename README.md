@@ -9,8 +9,8 @@ Script-assembly library for Neurai. Provides:
 - **Covenants** — partial-fill sell-order covenant (legacy and PQ variants)
   targeting the **DePIN-Test** opcode set (`OP_OUTPUTSCRIPT`,
   `OP_OUTPUTVALUE`, `OP_OUTPUTASSETFIELD`, `OP_INPUTASSETFIELD`,
-  `OP_TXFIELD`, `OP_CHECKTEMPLATEVERIFY`, `OP_CHECKSIGFROMSTACK`, 64-bit
-  `OP_MUL`/`OP_SUB`, …).
+  `OP_TXFIELD`, `OP_CHECKTEMPLATEVERIFY`, `OP_CHECKSIGFROMSTACK`,
+  `OP_CHAINCONTEXT`, 64-bit `OP_MUL`/`OP_SUB`, …).
 
 This is the canonical place to add new Neurai script builders; callers
 compose transactions with
@@ -95,8 +95,8 @@ stack, arithmetic, bitwise, crypto) plus every DePIN-Test addition
 `OP_TXFIELD`, `OP_TXLOCKTIME`, `OP_OUTPUTVALUE`, `OP_OUTPUTSCRIPT`,
 `OP_INPUTCOUNT`/`OP_OUTPUTCOUNT`, `OP_OUTPUTASSETFIELD`,
 `OP_INPUTASSETFIELD`, `OP_REFINPUTCOUNT`/`OP_REFINPUTFIELD`/
-`OP_REFINPUTASSETFIELD`, `OP_CAT`, `OP_SPLIT`, `OP_REVERSEBYTES`, 64-bit
-`OP_MUL`/`OP_DIV`/`OP_MOD`).
+`OP_REFINPUTASSETFIELD`, `OP_CHAINCONTEXT`, `OP_CAT`, `OP_SPLIT`,
+`OP_REVERSEBYTES`, 64-bit `OP_MUL`/`OP_DIV`/`OP_MOD`).
 
 Also exports selector tables:
 
@@ -114,6 +114,11 @@ opcodes.ASSETFIELD_REISSUABLE          // 0x04
 opcodes.ASSETFIELD_HAS_IPFS            // 0x05
 opcodes.ASSETFIELD_IPFS_HASH           // 0x06
 opcodes.ASSETFIELD_TYPE                // 0x07
+
+// For OP_CHAINCONTEXT
+opcodes.CHAINCONTEXT_HEIGHT            // 0x01
+opcodes.CHAINCONTEXT_MTP               // 0x02
+opcodes.CHAINCONTEXT_CHAIN_ID          // 0x03
 
 // Bitmask selectors for OP_TXHASH (any non-zero combination is valid)
 opcodes.TXHASH_VERSION            // 0x01
@@ -334,6 +339,18 @@ order, and the whole chain confirms together when the next block is
 mined. If the seller wants to stop the order at any point, she spends
 the current live UTXO via the cancel branch.
 
+Orders can also carry an optional expiry. When `expiration` is set, both
+buyer fill branches start with:
+
+```
+<expiration.value> <HEIGHT|MTP> OP_CHAINCONTEXT OP_GREATERTHAN OP_VERIFY
+```
+
+So fills are valid only while the configured height or median-time-past
+deadline is still greater than the chain context. At the deadline block/time
+and after it, buyer fills fail and the seller can recover the live order via
+the cancel branch.
+
 #### Alice / Bob / Carol flow
 
 1. **Alice** locks 100 CAT in a covenant UTXO (`buildPartialFillScript`).
@@ -366,7 +383,11 @@ import {
 const scriptPubKeyHex = buildPartialFillScriptHex({
   sellerAddress: aliceP2PKHAddress,  // "t..." on testnet / "N..." on mainnet
   tokenId: 'CAT',
-  unitPriceSats: 100_000_000n        // 1 XNA = 1e8 sats per indivisible unit
+  unitPriceSats: 100_000_000n,       // 1 XNA = 1e8 sats per indivisible unit
+  expiration: {
+    mode: 'height',                  // or 'mtp' for median-time-past seconds
+    value: 1_250_000n                // fills are rejected at/after this value
+  }
 });
 // Throws if the address is not a legacy P2PKH — the legacy covenant uses
 // OP_HASH160 + OP_CHECKSIG on the cancel branch and cannot commit to an
@@ -391,7 +412,8 @@ const cancelScriptSigHex = buildCancelScriptSigHex(aliceCancelSig, alicePubKey);
 for (const utxo of candidateUtxos) {
   try {
     const order = parsePartialFillScript(utxo.scriptPubKeyHex, 'xna-test');
-    // order.tokenId, order.unitPriceSats, order.sellerPubKeyHash, order.network
+    // order.tokenId, order.unitPriceSats, order.sellerPubKeyHash,
+    // order.expiration, order.network
     // The parser returns the 20-byte PKH; base58check-encode with the
     // network's legacy prefix (0x35 mainnet / 0x7f testnet) if you need
     // to display the seller's address.
@@ -409,6 +431,7 @@ OP_IF                                                              // cancel bra
 OP_ELSE
   OP_IF                                                            // full-fill branch
     # Stack entering: [ ]  (scriptSig pushed <1> <0>)
+    # Optional expiry: <deadline> <HEIGHT|MTP> OP_CHAINCONTEXT OP_GREATERTHAN OP_VERIFY
     <0> <0x02> OP_INPUTASSETFIELD                                  // N = inputAmount
     OP_DUP <unitPriceSats> OP_MUL
         <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY // payment value
@@ -418,6 +441,7 @@ OP_ELSE
     OP_DROP OP_1                                                   // no vout[2] required
   OP_ELSE                                                          // partial-fill branch
     # Stack entering: [ N ]  (scriptSig pushed <N> <0> <0>)
+    # Optional expiry: <deadline> <HEIGHT|MTP> OP_CHAINCONTEXT OP_GREATERTHAN OP_VERIFY
     OP_DUP <unitPriceSats> OP_MUL
         <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY // payment value
     <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY               // payment dest
