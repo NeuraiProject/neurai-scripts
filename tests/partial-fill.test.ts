@@ -92,9 +92,11 @@ describe('buildPartialFillScript', () => {
       ...baseParams,
       expiration: { mode: 'height', value: 1000n }
     });
-    const gate = '02e8030101d7a069';
+    // Selector 1 (HEIGHT) is emitted as OP_1 (0x51), consensus-minimal.
+    const gate = '02e80351d7a069';
     expect(hex).toContain('6763' + gate + '0052cf');
     expect(hex).toContain('67' + gate + '76' + '0400e1f505');
+    expect(hex).not.toContain('0101d7');
   });
 
   it('optionally gates buyer fills by MTP expiration', () => {
@@ -102,9 +104,11 @@ describe('buildPartialFillScript', () => {
       ...baseParams,
       expiration: { mode: 'mtp', value: 1_700_000_000n }
     });
-    const gate = '0400f153650102d7a069';
+    // Selector 2 (MTP) is emitted as OP_2 (0x52), consensus-minimal.
+    const gate = '0400f1536552d7a069';
     expect(hex).toContain('6763' + gate + '0052cf');
     expect(hex).toContain('67' + gate + '76' + '0400e1f505');
+    expect(hex).not.toContain('0102d7');
   });
 
   it('rejects an empty sellerAddress', () => {
@@ -180,6 +184,32 @@ describe('parsePartialFillScript', () => {
     expect(parsed.expiration).toEqual({ mode: 'height', value: 1000n });
     expect(parsed.tokenId).toBe('CAT');
     expect(parsed.unitPriceSats).toBe(100_000_000n);
+  });
+
+  it('parser accepts legacy raw-push selector (0x01 0x01) for HEIGHT', () => {
+    // Simulate a covenant produced by a builder that emits the selector as a
+    // raw 1-byte push (`01 01`) instead of OP_1 (`51`). Such scripts are not
+    // consensus-minimal, but the parser must still accept them so that any
+    // covenant in the wild built by older or external tooling round-trips.
+    const minimal = buildPartialFillScriptHex({
+      ...baseParams,
+      expiration: { mode: 'height', value: 1000n }
+    });
+    const legacy = minimal.split('02e80351d7a069').join('02e8030101d7a069');
+    expect(legacy).not.toBe(minimal);
+    const parsed = parsePartialFillScript(legacy, 'xna-test');
+    expect(parsed.expiration).toEqual({ mode: 'height', value: 1000n });
+  });
+
+  it('parser accepts legacy raw-push selector (0x01 0x02) for MTP', () => {
+    const minimal = buildPartialFillScriptHex({
+      ...baseParams,
+      expiration: { mode: 'mtp', value: 1_700_000_000n }
+    });
+    const legacy = minimal.split('0400f1536552d7a069').join('0400f153650102d7a069');
+    expect(legacy).not.toBe(minimal);
+    const parsed = parsePartialFillScript(legacy, 'xna-test');
+    expect(parsed.expiration).toEqual({ mode: 'mtp', value: 1_700_000_000n });
   });
 
   it('round-trips with a non-OP_N price', () => {

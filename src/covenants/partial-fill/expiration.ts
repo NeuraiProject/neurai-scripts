@@ -56,8 +56,13 @@ export function appendExpirationGate(
   expiration: PartialFillExpiration | undefined
 ): void {
   if (!expiration) return;
+  // Selectors 1 (HEIGHT) and 2 (MTP) must be pushed as OP_1 / OP_2 so the
+  // resulting script is consensus-minimal (MINIMALDATA). `pushBytes(0x01 N)`
+  // would emit `01 0N`, which the consensus rule rejects for N in 1..16.
+  // Parser side stays lenient (`readPushUint8` accepts both forms) so old
+  // covenants in the raw `01 0N` form keep round-tripping.
   b.pushInt(expiration.value)
-    .pushBytes(Uint8Array.of(selectorForMode(expiration.mode)))
+    .pushInt(selectorForMode(expiration.mode))
     .op(OP_CHAINCONTEXT, OP_GREATERTHAN, OP_VERIFY);
 }
 

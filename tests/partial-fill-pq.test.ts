@@ -90,9 +90,14 @@ describe('buildPartialFillScriptPQ', () => {
       ...baseParams,
       expiration: { mode: 'height', value: 1000n }
     });
-    const gate = '02e8030101d7a069';
+    // Gate: <push value=1000> OP_1 OP_CHAINCONTEXT OP_GREATERTHAN OP_VERIFY
+    // Selector 1 (HEIGHT) is emitted as OP_1 (0x51), not raw `01 01`, so the
+    // script is consensus-minimal.
+    const gate = '02e80351d7a069';
     expect(hex).toContain('6763' + gate + '0052cf');
     expect(hex).toContain('67' + gate + '76' + '0400e1f505');
+    // Sanity: the non-minimal raw-push form must NOT appear.
+    expect(hex).not.toContain('0101d7');
   });
 
   it('rejects a non-32-byte commitment', () => {
@@ -186,6 +191,35 @@ describe('parsePartialFillScriptPQ', () => {
     expect(parsePartialFillScriptPQ(hex).expiration).toEqual({
       mode: 'mtp',
       value: 1_700_000_000n
+    });
+  });
+
+  it('parser accepts legacy raw-push selector (0x01 0x02) for MTP', () => {
+    // PQ equivalent of the legacy back-compat test in partial-fill.test.ts.
+    // Old/external builders may emit the OP_CHAINCONTEXT selector as a raw
+    // 1-byte push (`01 02`) instead of OP_2 (`52`). The parser stays lenient.
+    const minimal = buildPartialFillScriptPQHex({
+      ...baseParams,
+      expiration: { mode: 'mtp', value: 1_700_000_000n }
+    });
+    const legacy = minimal.split('0400f1536552d7a069').join('0400f153650102d7a069');
+    expect(legacy).not.toBe(minimal);
+    expect(parsePartialFillScriptPQ(legacy).expiration).toEqual({
+      mode: 'mtp',
+      value: 1_700_000_000n
+    });
+  });
+
+  it('parser accepts legacy raw-push selector (0x01 0x01) for HEIGHT', () => {
+    const minimal = buildPartialFillScriptPQHex({
+      ...baseParams,
+      expiration: { mode: 'height', value: 1000n }
+    });
+    const legacy = minimal.split('02e80351d7a069').join('02e8030101d7a069');
+    expect(legacy).not.toBe(minimal);
+    expect(parsePartialFillScriptPQ(legacy).expiration).toEqual({
+      mode: 'height',
+      value: 1000n
     });
   });
 
