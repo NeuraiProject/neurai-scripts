@@ -19,7 +19,9 @@
  * Numbers are minimal CScriptNum stack values (0 = empty element). Wrap the
  * result with `buildAuthScriptWitnessNoAuth({ args, witnessScript: covenant })`
  * (from `standard/authscript.ts`) to get the final `[0x00, ...args, covenant]`
- * witness.
+ * witness, and serialize the spending transaction with
+ * `serializeTransaction` from `@neuraiproject/neurai-create-transaction`
+ * (0.5.1+, witness elements as hex strings: `witness.map(bytesToHex)`).
  */
 /**
  * Witness `args` for the public fill branches. Same semantics and

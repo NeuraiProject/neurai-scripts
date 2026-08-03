@@ -3,16 +3,17 @@ import { existsSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getNoAuthAddress } from '@neuraiproject/neurai-key';
 import {
+  computeTxid,
   createAssetTransferOutput,
   createStandardAssetTransferTransaction,
   createXnaOutput,
+  serializeTransaction,
   xnaToSatoshis
 } from '@neuraiproject/neurai-create-transaction';
 import {
   buildAuthScriptWitnessNoAuth,
   buildFillWitnessStack,
   bytesToHex,
-  concatBytes,
   hexToBytes
 } from '../src/index.js';
 
@@ -30,9 +31,9 @@ import {
 // AuthScript sighash for the cancel branch) remains the outstanding gate
 // before the covenant flow is documented as supported.
 //
-// This package does not serialize witness transactions (and neither does
-// neurai-create-transaction), so the spend is assembled by the test-local
-// serializer below.
+// The spend is serialized with neurai-create-transaction's transaction codec
+// (serializeTransaction, 0.5.1+), which handles the extended witness format;
+// computeTxid is asserted against the node's sendrawtransaction result.
 const WITNESS_SCRIPT_HEX = '00885187';
 
 const CONTAINER = process.env.NEURAI_REGTEST_CONTAINER ?? 'neurai-wt2';
@@ -115,67 +116,6 @@ function signAndTest(rawTx: string): { allowed: boolean; reason?: string; hex: s
   expect(signed.complete).toBe(true);
   const [result] = cliJson('testmempoolaccept', JSON.stringify([signed.hex]), 'true');
   return { allowed: Boolean(result.allowed), reason: result['reject-reason'], hex: signed.hex };
-}
-
-// ---------------------------------------------------------------------------
-// Test-local witness-transaction serializer (BIP144 layout). Neither this
-// package nor neurai-create-transaction serializes witness data; keep this
-// helper test-only.
-// ---------------------------------------------------------------------------
-
-function varint(n: number): Uint8Array {
-  if (n < 0xfd) return Uint8Array.of(n);
-  if (n <= 0xffff) return Uint8Array.of(0xfd, n & 0xff, (n >> 8) & 0xff);
-  throw new Error('varint: value too large for these vectors');
-}
-
-function u32LE(n: number): Uint8Array {
-  const out = new Uint8Array(4);
-  new DataView(out.buffer).setUint32(0, n, true);
-  return out;
-}
-
-function u64LE(n: bigint): Uint8Array {
-  const out = new Uint8Array(8);
-  new DataView(out.buffer).setBigUint64(0, n, true);
-  return out;
-}
-
-function txidLE(txidHex: string): Uint8Array {
-  return hexToBytes(txidHex).reverse();
-}
-
-function serializeWitnessTx(
-  inputs: Array<{ txid: string; vout: number }>,
-  outputs: Array<{ valueSats: bigint; scriptPubKeyHex: string }>,
-  witnesses: Uint8Array[][],
-  version = 2,
-  locktime = 0
-): string {
-  if (witnesses.length !== inputs.length) {
-    throw new Error('one witness stack per input required');
-  }
-  const parts: Uint8Array[] = [
-    u32LE(version),
-    Uint8Array.of(0x00, 0x01), // segwit marker + flag
-    varint(inputs.length)
-  ];
-  for (const input of inputs) {
-    parts.push(txidLE(input.txid), u32LE(input.vout), varint(0), hexToBytes('ffffffff'));
-  }
-  parts.push(varint(outputs.length));
-  for (const output of outputs) {
-    const script = hexToBytes(output.scriptPubKeyHex);
-    parts.push(u64LE(output.valueSats), varint(script.length), script);
-  }
-  for (const stack of witnesses) {
-    parts.push(varint(stack.length));
-    for (const element of stack) {
-      parts.push(varint(element.length), element);
-    }
-  }
-  parts.push(u32LE(locktime));
-  return bytesToHex(concatBytes(...parts));
 }
 
 describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witness spend)', () => {
@@ -272,22 +212,29 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     });
     expect(witness.map(bytesToHex)).toEqual(['00', '01', '', WITNESS_SCRIPT_HEX]);
 
-    const spendHex = serializeWitnessTx(
-      [
-        { txid: depositTxid, vout: xnaVout },
-        { txid: depositTxid, vout: assetVout }
+    // Type boundary: the witness builders return Uint8Array[]; the codec's
+    // serializeTransaction expects hex strings, one per stack element.
+    const witnessHex = witness.map(bytesToHex);
+    const outputs = [
+      createXnaOutput(D, xnaToSatoshis(1) - FEE),
+      createAssetTransferOutput(D, 'CARGO', xnaToSatoshis(5))
+    ];
+    const spendHex = serializeTransaction({
+      version: 2,
+      inputs: [
+        { txid: depositTxid, vout: xnaVout, scriptSigHex: '', sequence: 0xffffffff, witness: witnessHex },
+        { txid: depositTxid, vout: assetVout, scriptSigHex: '', sequence: 0xffffffff, witness: witnessHex }
       ],
-      [
-        createXnaOutput(D, xnaToSatoshis(1) - FEE),
-        createAssetTransferOutput(D, 'CARGO', xnaToSatoshis(5))
-      ],
-      [witness, witness]
-    );
+      outputs,
+      vrefin: [],
+      locktime: 0
+    });
 
     const [result] = cliJson('testmempoolaccept', JSON.stringify([spendHex]), 'true');
     expect(Boolean(result.allowed), `spend reject: ${result['reject-reason']}`).toBe(true);
 
-    cli('sendrawtransaction', spendHex, 'true');
+    const spendTxid = cli('sendrawtransaction', spendHex, 'true');
+    expect(spendTxid).toBe(computeTxid(spendHex));
     cli('generate', 1);
 
     // The asset came back out of the covenant commitment: D holds all 100.

@@ -1121,43 +1121,43 @@ var NeuraiScriptsBundle = (function (exports) {
     // Makes the utils un-importable in browsers without a bundler.
     // Once node.js 18 is deprecated (2025-04-30), we can just drop the import.
     /** Checks if something is Uint8Array. Be careful: nodejs Buffer will return true. */
-    function isBytes(a) {
+    function isBytes$1(a) {
         return a instanceof Uint8Array || (ArrayBuffer.isView(a) && a.constructor.name === 'Uint8Array');
     }
     /** Asserts something is Uint8Array. */
-    function abytes(b, ...lengths) {
-        if (!isBytes(b))
+    function abytes$1(b, ...lengths) {
+        if (!isBytes$1(b))
             throw new Error('Uint8Array expected');
         if (lengths.length > 0 && !lengths.includes(b.length))
             throw new Error('Uint8Array expected of length ' + lengths + ', got length=' + b.length);
     }
     /** Asserts a hash instance has not been destroyed / finished */
-    function aexists(instance, checkFinished = true) {
+    function aexists$1(instance, checkFinished = true) {
         if (instance.destroyed)
             throw new Error('Hash instance has been destroyed');
         if (checkFinished && instance.finished)
             throw new Error('Hash#digest() has already been called');
     }
     /** Asserts output is properly-sized byte array */
-    function aoutput(out, instance) {
-        abytes(out);
+    function aoutput$1(out, instance) {
+        abytes$1(out);
         const min = instance.outputLen;
         if (out.length < min) {
             throw new Error('digestInto() expects output buffer of length at least ' + min);
         }
     }
     /** Zeroize a byte array. Warning: JS provides no guarantees. */
-    function clean(...arrays) {
+    function clean$1(...arrays) {
         for (let i = 0; i < arrays.length; i++) {
             arrays[i].fill(0);
         }
     }
     /** Create DataView of an array for easy byte-level manipulation. */
-    function createView(arr) {
+    function createView$1(arr) {
         return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
     }
     /** The rotate right (circular right shift) operation for uint32 */
-    function rotr(word, shift) {
+    function rotr$1(word, shift) {
         return (word << (32 - shift)) | (word >>> shift);
     }
     /**
@@ -1177,14 +1177,14 @@ var NeuraiScriptsBundle = (function (exports) {
     function toBytes(data) {
         if (typeof data === 'string')
             data = utf8ToBytes(data);
-        abytes(data);
+        abytes$1(data);
         return data;
     }
     /** For runtime check if class implements interface */
     class Hash {
     }
     /** Wraps hash function, creating an interface on top of it */
-    function createHasher(hashCons) {
+    function createHasher$1(hashCons) {
         const hashC = (msg) => hashCons().update(toBytes(msg)).digest();
         const tmp = hashCons();
         hashC.outputLen = tmp.outputLen;
@@ -1211,18 +1211,18 @@ var NeuraiScriptsBundle = (function (exports) {
         view.setUint32(byteOffset + l, wl, isLE);
     }
     /** Choice: a ? b : c */
-    function Chi(a, b, c) {
+    function Chi$1(a, b, c) {
         return (a & b) ^ (~a & c);
     }
     /** Majority function, true if any two inputs is true. */
-    function Maj(a, b, c) {
+    function Maj$1(a, b, c) {
         return (a & b) ^ (a & c) ^ (b & c);
     }
     /**
      * Merkle-Damgard hash construction base class.
      * Could be used to create MD5, RIPEMD, SHA1, SHA2.
      */
-    class HashMD extends Hash {
+    let HashMD$1 = class HashMD extends Hash {
         constructor(blockLen, outputLen, padOffset, isLE) {
             super();
             this.finished = false;
@@ -1234,19 +1234,19 @@ var NeuraiScriptsBundle = (function (exports) {
             this.padOffset = padOffset;
             this.isLE = isLE;
             this.buffer = new Uint8Array(blockLen);
-            this.view = createView(this.buffer);
+            this.view = createView$1(this.buffer);
         }
         update(data) {
-            aexists(this);
+            aexists$1(this);
             data = toBytes(data);
-            abytes(data);
+            abytes$1(data);
             const { view, buffer, blockLen } = this;
             const len = data.length;
             for (let pos = 0; pos < len;) {
                 const take = Math.min(blockLen - this.pos, len - pos);
                 // Fast path: we have at least one block in input, cast it to view and process
                 if (take === blockLen) {
-                    const dataView = createView(data);
+                    const dataView = createView$1(data);
                     for (; blockLen <= len - pos; pos += blockLen)
                         this.process(dataView, pos);
                     continue;
@@ -1264,8 +1264,8 @@ var NeuraiScriptsBundle = (function (exports) {
             return this;
         }
         digestInto(out) {
-            aexists(this);
-            aoutput(out, this);
+            aexists$1(this);
+            aoutput$1(out, this);
             this.finished = true;
             // Padding
             // We can avoid allocation of buffer for padding completely if it
@@ -1274,7 +1274,7 @@ var NeuraiScriptsBundle = (function (exports) {
             let { pos } = this;
             // append the bit '1' to the message
             buffer[pos++] = 0b10000000;
-            clean(this.buffer.subarray(pos));
+            clean$1(this.buffer.subarray(pos));
             // we have less than padOffset left in buffer, so we cannot put length in
             // current block, need process it and pad again
             if (this.padOffset > blockLen - pos) {
@@ -1289,7 +1289,7 @@ var NeuraiScriptsBundle = (function (exports) {
             // So we just write lowest 64 bits of that value.
             setBigUint64(view, blockLen - 8, BigInt(this.length * 8), isLE);
             this.process(view, 0);
-            const oview = createView(out);
+            const oview = createView$1(out);
             const len = this.outputLen;
             // NOTE: we do division by 4 later, which should be fused in single op with modulo by JIT
             if (len % 4)
@@ -1323,13 +1323,13 @@ var NeuraiScriptsBundle = (function (exports) {
         clone() {
             return this._cloneInto();
         }
-    }
+    };
     /**
      * Initial SHA-2 state: fractional parts of square roots of first 16 primes 2..53.
      * Check out `test/misc/sha2-gen-iv.js` for recomputation guide.
      */
     /** Initial SHA256 state. Bits 0..32 of frac part of sqrt of primes 2..19 */
-    const SHA256_IV = /* @__PURE__ */ Uint32Array.from([
+    const SHA256_IV$1 = /* @__PURE__ */ Uint32Array.from([
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
     ]);
 
@@ -1345,7 +1345,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * First 32 bits of fractional parts of the cube roots of the first 64 primes 2..311)
      */
     // prettier-ignore
-    const SHA256_K = /* @__PURE__ */ Uint32Array.from([
+    const SHA256_K$1 = /* @__PURE__ */ Uint32Array.from([
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
         0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
         0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -1356,20 +1356,20 @@ var NeuraiScriptsBundle = (function (exports) {
         0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
     ]);
     /** Reusable temporary buffer. "W" comes straight from spec. */
-    const SHA256_W = /* @__PURE__ */ new Uint32Array(64);
-    class SHA256 extends HashMD {
+    const SHA256_W$1 = /* @__PURE__ */ new Uint32Array(64);
+    class SHA256 extends HashMD$1 {
         constructor(outputLen = 32) {
             super(64, outputLen, 8, false);
             // We cannot use array here since array allows indexing by variable
             // which means optimizer/compiler cannot use registers.
-            this.A = SHA256_IV[0] | 0;
-            this.B = SHA256_IV[1] | 0;
-            this.C = SHA256_IV[2] | 0;
-            this.D = SHA256_IV[3] | 0;
-            this.E = SHA256_IV[4] | 0;
-            this.F = SHA256_IV[5] | 0;
-            this.G = SHA256_IV[6] | 0;
-            this.H = SHA256_IV[7] | 0;
+            this.A = SHA256_IV$1[0] | 0;
+            this.B = SHA256_IV$1[1] | 0;
+            this.C = SHA256_IV$1[2] | 0;
+            this.D = SHA256_IV$1[3] | 0;
+            this.E = SHA256_IV$1[4] | 0;
+            this.F = SHA256_IV$1[5] | 0;
+            this.G = SHA256_IV$1[6] | 0;
+            this.H = SHA256_IV$1[7] | 0;
         }
         get() {
             const { A, B, C, D, E, F, G, H } = this;
@@ -1389,21 +1389,21 @@ var NeuraiScriptsBundle = (function (exports) {
         process(view, offset) {
             // Extend the first 16 words into the remaining 48 words w[16..63] of the message schedule array
             for (let i = 0; i < 16; i++, offset += 4)
-                SHA256_W[i] = view.getUint32(offset, false);
+                SHA256_W$1[i] = view.getUint32(offset, false);
             for (let i = 16; i < 64; i++) {
-                const W15 = SHA256_W[i - 15];
-                const W2 = SHA256_W[i - 2];
-                const s0 = rotr(W15, 7) ^ rotr(W15, 18) ^ (W15 >>> 3);
-                const s1 = rotr(W2, 17) ^ rotr(W2, 19) ^ (W2 >>> 10);
-                SHA256_W[i] = (s1 + SHA256_W[i - 7] + s0 + SHA256_W[i - 16]) | 0;
+                const W15 = SHA256_W$1[i - 15];
+                const W2 = SHA256_W$1[i - 2];
+                const s0 = rotr$1(W15, 7) ^ rotr$1(W15, 18) ^ (W15 >>> 3);
+                const s1 = rotr$1(W2, 17) ^ rotr$1(W2, 19) ^ (W2 >>> 10);
+                SHA256_W$1[i] = (s1 + SHA256_W$1[i - 7] + s0 + SHA256_W$1[i - 16]) | 0;
             }
             // Compression function main loop, 64 rounds
             let { A, B, C, D, E, F, G, H } = this;
             for (let i = 0; i < 64; i++) {
-                const sigma1 = rotr(E, 6) ^ rotr(E, 11) ^ rotr(E, 25);
-                const T1 = (H + sigma1 + Chi(E, F, G) + SHA256_K[i] + SHA256_W[i]) | 0;
-                const sigma0 = rotr(A, 2) ^ rotr(A, 13) ^ rotr(A, 22);
-                const T2 = (sigma0 + Maj(A, B, C)) | 0;
+                const sigma1 = rotr$1(E, 6) ^ rotr$1(E, 11) ^ rotr$1(E, 25);
+                const T1 = (H + sigma1 + Chi$1(E, F, G) + SHA256_K$1[i] + SHA256_W$1[i]) | 0;
+                const sigma0 = rotr$1(A, 2) ^ rotr$1(A, 13) ^ rotr$1(A, 22);
+                const T2 = (sigma0 + Maj$1(A, B, C)) | 0;
                 H = G;
                 G = F;
                 F = E;
@@ -1425,11 +1425,11 @@ var NeuraiScriptsBundle = (function (exports) {
             this.set(A, B, C, D, E, F, G, H);
         }
         roundClean() {
-            clean(SHA256_W);
+            clean$1(SHA256_W$1);
         }
         destroy() {
             this.set(0, 0, 0, 0, 0, 0, 0, 0);
-            clean(this.buffer);
+            clean$1(this.buffer);
         }
     }
     /**
@@ -1439,7 +1439,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * To break sha256 using birthday attack, attackers need to try 2^128 hashes.
      * BTC network is doing 2^70 hashes/sec (2^95 hashes/year) as per 2025.
      */
-    const sha256$1 = /* @__PURE__ */ createHasher(() => new SHA256());
+    const sha256$2 = /* @__PURE__ */ createHasher$1(() => new SHA256());
 
     /**
      * SHA2-256 a.k.a. sha256. In JS, it is the fastest hash, even faster than Blake3.
@@ -1452,7 +1452,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * @deprecated
      */
     /** @deprecated Use import from `noble/hashes/sha2` module */
-    const sha256 = sha256$1;
+    const sha256$1 = sha256$2;
 
     function bs58checkBase (checksumFn) {
         // Encode a buffer as a base58-check encoded string
@@ -1500,7 +1500,7 @@ var NeuraiScriptsBundle = (function (exports) {
 
     // SHA256(SHA256(buffer))
     function sha256x2(buffer) {
-        return sha256(sha256(buffer));
+        return sha256$1(sha256$1(buffer));
     }
     var bs58check = bs58checkBase(sha256x2);
 
@@ -2563,7 +2563,9 @@ var NeuraiScriptsBundle = (function (exports) {
      * Numbers are minimal CScriptNum stack values (0 = empty element). Wrap the
      * result with `buildAuthScriptWitnessNoAuth({ args, witnessScript: covenant })`
      * (from `standard/authscript.ts`) to get the final `[0x00, ...args, covenant]`
-     * witness.
+     * witness, and serialize the spending transaction with
+     * `serializeTransaction` from `@neuraiproject/neurai-create-transaction`
+     * (0.5.1+, witness elements as hex strings: `witness.map(bytesToHex)`).
      */
     const MAX_PQ_SCRIPT_ELEMENT_SIZE = 3072;
     /**
