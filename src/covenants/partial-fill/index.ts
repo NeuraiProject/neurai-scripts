@@ -22,5 +22,11 @@ export {
   buildCancelScriptSigPQHex
 } from './spend-pq.js';
 
+export {
+  buildFillWitnessStack,
+  buildCancelWitnessStack,
+  buildCancelWitnessStackPQ
+} from './witness.js';
+
 export { parsePartialFillScript } from './parse.js';
 export { parsePartialFillScriptPQ, isPartialFillScriptPQ } from './parse-pq.js';

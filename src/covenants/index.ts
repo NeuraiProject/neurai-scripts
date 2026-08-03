@@ -14,5 +14,9 @@ export {
   buildCancelScriptSigPQHex,
   parsePartialFillScriptPQ,
   isPartialFillScriptPQ,
-  DEFAULT_PQ_TXHASH_SELECTOR
+  DEFAULT_PQ_TXHASH_SELECTOR,
+  // AuthScript (NoAuth) witness-stack variants
+  buildFillWitnessStack,
+  buildCancelWitnessStack,
+  buildCancelWitnessStackPQ
 } from './partial-fill/index.js';
