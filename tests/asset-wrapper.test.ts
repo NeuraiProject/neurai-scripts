@@ -27,6 +27,7 @@ describe('splitAssetWrappedScriptPubKey — real testnet fixtures', () => {
     expect(result.assetTransfer).not.toBeNull();
     expect(result.assetTransfer?.assetName).toBe('TREST');
     expect(result.assetTransfer?.amountRaw).toBe(10_000_000_000n);
+    expect(result.assetTransfer?.marker).toBe('rvn');
     expect(result.assetTransfer?.payloadHex).toBe(
       '72766e7405545245535400e40b5402000000'
     );
@@ -38,6 +39,54 @@ describe('splitAssetWrappedScriptPubKey — real testnet fixtures', () => {
     expect(result.assetTransfer).not.toBeNull();
     expect(result.assetTransfer?.assetName).toBe('TREST');
     expect(result.assetTransfer?.amountRaw).toBe(10_000_000_000n);
+    expect(result.assetTransfer?.marker).toBe('rvn');
+  });
+});
+
+describe('splitAssetWrappedScriptPubKey — NIP-040 "xna" marker', () => {
+  // Same TREST payload as the real fixtures but with the post-activation
+  // "xna" magic (0x78 0x6e 0x61) the node emits on testnet/regtest.
+  const XNA_PAYLOAD = '786e617405545245535400e40b5402000000';
+  const XNA_PQ_SPK = REAL_PQ_PREFIX + 'c0' + '12' + XNA_PAYLOAD + '75';
+  const XNA_LEGACY_SPK = REAL_LEGACY_PREFIX + 'c0' + '12' + XNA_PAYLOAD + '75';
+
+  it('splits a PQ (witness v1) xna-wrapped UTXO and reports marker "xna"', () => {
+    const result = splitAssetWrappedScriptPubKey(XNA_PQ_SPK);
+    expect(result.prefixHex).toBe(REAL_PQ_PREFIX);
+    expect(result.assetTransfer?.assetName).toBe('TREST');
+    expect(result.assetTransfer?.amountRaw).toBe(10_000_000_000n);
+    expect(result.assetTransfer?.marker).toBe('xna');
+    expect(result.assetTransfer?.payloadHex).toBe(XNA_PAYLOAD);
+  });
+
+  it('splits a legacy P2PKH xna-wrapped UTXO and reports marker "xna"', () => {
+    const result = splitAssetWrappedScriptPubKey(XNA_LEGACY_SPK);
+    expect(result.prefixHex).toBe(REAL_LEGACY_PREFIX);
+    expect(result.assetTransfer?.assetName).toBe('TREST');
+    expect(result.assetTransfer?.amountRaw).toBe(10_000_000_000n);
+    expect(result.assetTransfer?.marker).toBe('xna');
+  });
+
+  it('throws on near-miss marker "xnn"', () => {
+    // "xnn" + transfer type + varstr "AAA" + 8-byte amount
+    const badPayload = '786e6e74' + '03' + '414141' + '0000000000000000';
+    const len = (badPayload.length / 2).toString(16).padStart(2, '0');
+    const spk = REAL_LEGACY_PREFIX + 'c0' + len + badPayload + '75';
+    expect(() => splitAssetWrappedScriptPubKey(spk)).toThrow(/magic mismatch/);
+  });
+
+  it('throws on truncated marker (payload shorter than magic + layout)', () => {
+    // Only "xn" — far below the minimum transfer layout.
+    const spk = REAL_LEGACY_PREFIX + 'c0' + '02' + '786e' + '75';
+    expect(() => splitAssetWrappedScriptPubKey(spk)).toThrow(/too short/);
+  });
+
+  it('throws on xna payload with a non-transfer type marker', () => {
+    // "xna" + 0x71 (issue) + varstr "ABC" + 8-byte amount
+    const badPayload = '786e6171' + '03' + '414243' + '0000000000000000';
+    const len = (badPayload.length / 2).toString(16).padStart(2, '0');
+    const spk = REAL_LEGACY_PREFIX + 'c0' + len + badPayload + '75';
+    expect(() => splitAssetWrappedScriptPubKey(spk)).toThrow(/transfer/);
   });
 });
 
@@ -69,7 +118,7 @@ describe('splitAssetWrappedScriptPubKey — payload with optional tail', () => {
   // payload layout:
   //   rvn|t || len(3) || "CAT" || int64LE(50000) || 32 bytes of "message" ||
   //   int64LE(expireTime)
-  function buildWrappedWithTail(): string {
+  function buildWrappedWithTail(magicHex: string): string {
     const prefix = REAL_LEGACY_PREFIX;
     const name = 'CAT';
     const nameLen = name.length.toString(16).padStart(2, '0');
@@ -77,17 +126,21 @@ describe('splitAssetWrappedScriptPubKey — payload with optional tail', () => {
     const amountLE = '50c3000000000000'; // int64LE(50000)
     const messageRef = 'aa'.repeat(32);
     const expireLE = 'f0f1f2f3f4f5f6f7';
-    const payloadHex = '72766e74' + nameLen + nameHex + amountLE + messageRef + expireLE;
+    const payloadHex = magicHex + '74' + nameLen + nameHex + amountLE + messageRef + expireLE;
     const payloadLen = (payloadHex.length / 2).toString(16).padStart(2, '0');
     return prefix + 'c0' + payloadLen + payloadHex + '75';
   }
 
-  it('tolerates optional message + expireTime tail after amountRaw', () => {
-    const spk = buildWrappedWithTail();
+  it.each([
+    ['rvn', '72766e'],
+    ['xna', '786e61'],
+  ])('tolerates optional message + expireTime tail after amountRaw (%s)', (marker, magicHex) => {
+    const spk = buildWrappedWithTail(magicHex);
     const result = splitAssetWrappedScriptPubKey(spk);
     expect(result.prefixHex).toBe(REAL_LEGACY_PREFIX);
     expect(result.assetTransfer?.assetName).toBe('CAT');
     expect(result.assetTransfer?.amountRaw).toBe(50_000n);
+    expect(result.assetTransfer?.marker).toBe(marker);
     // Full payload including tail is preserved for consumers that want it.
     expect(result.assetTransfer?.payloadHex).toContain('aa'.repeat(32));
     expect(result.assetTransfer?.payloadHex).toContain('f0f1f2f3f4f5f6f7');

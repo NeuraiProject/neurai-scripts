@@ -9,10 +9,15 @@
  * AuthScript witness v1, or a bare covenant such as the partial-fill sell
  * order), and `payload` serializes a `CAssetTransfer`:
  *
- *     payload = rvn_prefix (0x72 0x76 0x6e) || type_marker (0x74 transfer)
+ *     payload = marker ("rvn" 0x72 0x76 0x6e | "xna" 0x78 0x6e 0x61)
+ *             || type_marker (0x74 transfer)
  *             || VarStr(assetName)
  *             || int64LE(amountRaw)
  *             [ || messageRef (optional) || int64LE(expireTime) (optional) ]
+ *
+ * NIP-040: mainnet still emits the Ravencoin-inherited "rvn" marker;
+ * testnet/regtest emit "xna" after activation. Both are accepted when
+ * reading — the detected marker is surfaced on the parsed payload.
  *
  * This helper separates the two halves so consumers can validate the prefix
  * (e.g. feed it to `parsePartialFillScript`) while independently reading the
@@ -23,12 +28,16 @@
  * Bare (non-wrapped) scriptPubKeys round-trip through this helper by
  * returning `prefixHex === input` and `assetTransfer === null`.
  */
+/** NIP-040 asset payload marker: legacy `rvn` or post-activation `xna`. */
+export type AssetMarker = 'rvn' | 'xna';
 export interface AssetTransferPayload {
     /** ASCII asset name as declared in the VarStr field. */
     assetName: string;
     /** Raw satoshi-scaled amount from the int64LE field. Display units = raw / 1e8. */
     amountRaw: bigint;
-    /** Hex of the full payload bytes (starting at the `rvn` magic, ending at
+    /** Marker detected at the start of the payload (`rvn` | `xna`). */
+    marker: AssetMarker;
+    /** Hex of the full payload bytes (starting at the marker magic, ending at
      *  the last byte before OP_DROP). Includes optional tail when present. */
     payloadHex: string;
 }
