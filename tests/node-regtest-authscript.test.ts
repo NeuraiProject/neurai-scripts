@@ -7,6 +7,7 @@ import {
   createAssetTransferOutput,
   createStandardAssetTransferTransaction,
   createXnaOutput,
+  resolveAssetEncodingContext,
   serializeTransaction,
   xnaToSatoshis
 } from '@neuraiproject/neurai-create-transaction';
@@ -175,6 +176,7 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     const asset = assetUtxo(D, 'CARGO');
     const fees = xnaUtxo(D, 5);
     const deposit = createStandardAssetTransferTransaction({
+      assetChain: 'regtest',
       inputs: [
         { txid: asset.txid, vout: asset.outputIndex },
         { txid: fees.txid, vout: fees.vout }
@@ -217,7 +219,7 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     const witnessHex = witness.map(bytesToHex);
     const outputs = [
       createXnaOutput(D, xnaToSatoshis(1) - FEE),
-      createAssetTransferOutput(D, 'CARGO', xnaToSatoshis(5))
+      createAssetTransferOutput(resolveAssetEncodingContext('regtest'), D, 'CARGO', xnaToSatoshis(5))
     ];
     const spendHex = serializeTransaction({
       version: 2,
