@@ -36,7 +36,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@neuraiproject/neurai-create-transaction": "^0.6.0"
+    "@neuraiproject/neurai-create-transaction": "^0.7.0"
   },
   "keywords": [
     "neurai",
@@ -60,6 +60,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@neuraiproject/neurai-key": "^4.0.0",
     "@rollup/plugin-commonjs": "^28.0.8",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "bech32": "^2.0.0",

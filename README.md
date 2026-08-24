@@ -85,6 +85,32 @@ import { ScriptBuilder, opcodes, encodeP2WPKHScriptPubKey, buildPartialFillScrip
 
 ---
 
+## Asset-transfer wrappers and NIP-040
+
+`splitAssetWrappedScriptPubKey(scriptPubKeyHex)` separates a spendable script
+prefix from its `OP_XNA_ASSET <payload> OP_DROP` transfer wrapper. It returns
+the original prefix as `prefixHex` and either `assetTransfer: null` or:
+
+```ts
+{
+  assetName: string;
+  amountRaw: bigint;
+  marker: 'rvn' | 'xna';
+  payloadHex: string;
+}
+```
+
+NIP-040 changed the marker used by newly created asset outputs from `rvn` to
+`xna`. The parser always accepts both because pre-activation UTXOs remain part
+of chain history and stay spendable. Parsing therefore needs no network,
+height, or activation flag; `marker` reports what was actually encoded.
+
+The helper remains intentionally limited to transfer payloads (`0x74`).
+Issuance, owner, and reissue payload types are outside this API and continue to
+raise `not a transfer`.
+
+---
+
 ## Core primitives
 
 ### Opcode constants (`./core/opcodes.ts`)
