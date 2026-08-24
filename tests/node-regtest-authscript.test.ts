@@ -7,7 +7,6 @@ import {
   createAssetTransferOutput,
   createStandardAssetTransferTransaction,
   createXnaOutput,
-  resolveAssetEncodingContext,
   serializeTransaction,
   xnaToSatoshis
 } from '@neuraiproject/neurai-create-transaction';
@@ -15,8 +14,10 @@ import {
   buildAuthScriptWitnessNoAuth,
   buildFillWitnessStack,
   bytesToHex,
-  hexToBytes
+  hexToBytes,
+  splitAssetWrappedScriptPubKey
 } from '../src/index.js';
+import type { AssetMarker } from '../src/index.js';
 
 // End-to-end AuthScript (NoAuth) vector: deposit an asset into a covenant
 // commitment derived with neurai-key, then SPEND it with the witness-stack
@@ -68,6 +69,7 @@ const P2P_PORT = RPC_PORT + 1;
 const DATADIR = `/tmp/neurai-regtest-authscript-${process.pid}`;
 
 let D = '';
+let ASSET_MARKER: AssetMarker = 'rvn';
 
 function sh(args: string[], allowFail = false): string {
   const [bin, ...rest] =
@@ -147,6 +149,15 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     }
     if (!ready) throw new Error('neuraid did not come up');
 
+    const info = cliJson('getblockchaininfo');
+    if (info.asset_marker !== 'rvn' && info.asset_marker !== 'xna') {
+      throw new Error(
+        'getblockchaininfo.asset_marker missing or invalid: this suite requires NIP-040 reporting'
+      );
+    }
+    ASSET_MARKER = info.asset_marker;
+    expect(ASSET_MARKER).toBe('xna');
+
     // Enough mature coinbases to fund the 1000 XNA root-asset burn.
     cli('generate', 150);
     D = cli('getnewaddress');
@@ -176,7 +187,7 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     const asset = assetUtxo(D, 'CARGO');
     const fees = xnaUtxo(D, 5);
     const deposit = createStandardAssetTransferTransaction({
-      assetChain: 'regtest',
+      assetMarker: ASSET_MARKER,
       inputs: [
         { txid: asset.txid, vout: asset.outputIndex },
         { txid: fees.txid, vout: fees.vout }
@@ -206,6 +217,11 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     expect(xnaVout).toBeGreaterThanOrEqual(0);
     expect(assetVout).toBeGreaterThanOrEqual(0);
 
+    const wrapped = splitAssetWrappedScriptPubKey(decoded.vout[assetVout].scriptPubKey.hex);
+    expect(wrapped.prefixHex).toBe(`5120${noauth.commitment}`);
+    expect(wrapped.assetTransfer?.assetName).toBe('CARGO');
+    expect(wrapped.assetTransfer?.marker).toBe(ASSET_MARKER);
+
     // 3. Spend both NoAuth UTXOs with the witness builders. The committed
     //    script verifies the exact full-fill stack: [<1>, <0>].
     const witness = buildAuthScriptWitnessNoAuth({
@@ -219,7 +235,7 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     const witnessHex = witness.map(bytesToHex);
     const outputs = [
       createXnaOutput(D, xnaToSatoshis(1) - FEE),
-      createAssetTransferOutput(resolveAssetEncodingContext('regtest'), D, 'CARGO', xnaToSatoshis(5))
+      createAssetTransferOutput(D, 'CARGO', xnaToSatoshis(5), { assetMarker: ASSET_MARKER })
     ];
     const spendHex = serializeTransaction({
       version: 2,

@@ -20,6 +20,17 @@ const REAL_LEGACY_TREST_SPK =
   'c0' + '12' + '72766e7405545245535400e40b540200000075';
 const REAL_LEGACY_PREFIX = '76a914d57bac106ec4abbf707d4056444cd3e9f9659ec388ac';
 
+// Real testnet UTXOs for &DEPINTESTING on both sides of NIP-040:
+// height 271465 uses rvn; height 324809 uses xna.
+const REAL_RVN_DEPINTESTING_SPK =
+  '76a91445c89b4d678640a084759f2fe7d1d279c3d9206388ac' +
+  'c0' + '1a' + '72766e74' + '0d' + '26444550494e54455354494e47' +
+  '00e1f50500000000' + '75';
+const REAL_XNA_DEPINTESTING_SPK =
+  '76a914096921e47993b59aeb635942f99f6b079141e2ba88ac' +
+  'c0' + '1a' + '786e6174' + '0d' + '26444550494e54455354494e47' +
+  '003ba53018090000' + '75';
+
 describe('splitAssetWrappedScriptPubKey — real testnet fixtures', () => {
   it('splits a PQ (witness v1) asset-wrapped UTXO into prefix + TREST transfer', () => {
     const result = splitAssetWrappedScriptPubKey(REAL_PQ_TREST_SPK);
@@ -40,6 +51,19 @@ describe('splitAssetWrappedScriptPubKey — real testnet fixtures', () => {
     expect(result.assetTransfer?.assetName).toBe('TREST');
     expect(result.assetTransfer?.amountRaw).toBe(10_000_000_000n);
     expect(result.assetTransfer?.marker).toBe('rvn');
+  });
+
+  it('parses real pre- and post-NIP-040 UTXOs for the same asset', () => {
+    const legacy = splitAssetWrappedScriptPubKey(REAL_RVN_DEPINTESTING_SPK);
+    const current = splitAssetWrappedScriptPubKey(REAL_XNA_DEPINTESTING_SPK);
+
+    expect(legacy.assetTransfer?.assetName).toBe('&DEPINTESTING');
+    expect(legacy.assetTransfer?.amountRaw).toBe(100_000_000n);
+    expect(legacy.assetTransfer?.marker).toBe('rvn');
+
+    expect(current.assetTransfer?.assetName).toBe('&DEPINTESTING');
+    expect(current.assetTransfer?.amountRaw).toBe(9_999_500_000_000n);
+    expect(current.assetTransfer?.marker).toBe('xna');
   });
 });
 
