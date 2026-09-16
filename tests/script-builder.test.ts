@@ -74,3 +74,19 @@ describe('ScriptBuilder', () => {
     expect(hex).toBe('76a95187');
   });
 });
+
+it('rejects unsafe numeric ScriptNum inputs rather than rounding them', () => {
+  expect(() => encodeScriptNum(Number(9007199254740993n))).toThrow();
+  expect(() => pushInt(Number(9007199254740993n))).toThrow();
+});
+
+it('keeps adjacent large ScriptNums distinct through the monetary maximum', () => {
+  const values = [9007199254740992n, 9007199254740993n, 10000000000000001n, 2100000000000000000n];
+  for (const value of values) {
+    const bytes = encodeScriptNum(value);
+    let decoded = 0n;
+    for (let i = bytes.length - 1; i >= 0; i--) decoded = (decoded << 8n) | BigInt(bytes[i]);
+    expect(decoded).toBe(value);
+  }
+  expect(bytesToHex(encodeScriptNum(values[0]))).not.toBe(bytesToHex(encodeScriptNum(values[1])));
+});

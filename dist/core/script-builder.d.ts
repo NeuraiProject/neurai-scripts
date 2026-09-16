@@ -1,10 +1,4 @@
 /**
- * Low-level Script assembler. Emits the exact byte layout expected by the
- * Neurai interpreter: pushdata prefixes follow the same rules as Bitcoin
- * (direct push for 1..75 bytes, OP_PUSHDATA1/2/4 otherwise), and integers
- * are minimally-encoded as CScriptNum.
- */
-/**
  * Minimal CScriptNum encoding (Bitcoin consensus rules).
  *
  * - 0 → empty vector

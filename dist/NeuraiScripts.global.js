@@ -44,6 +44,18 @@ var NeuraiScriptsBundle = (function (exports) {
         return true;
     }
 
+    /** Exact monetary primitives. This module has no runtime dependencies. */
+    /** Normalize a raw integer without preserving an already rounded number. */
+    function toRawInteger(value, label = 'amount') {
+        if (typeof value === 'bigint')
+            return value;
+        if (typeof value === 'number' && Number.isSafeInteger(value))
+            return BigInt(value);
+        if (typeof value === 'string' && /^-?\d+$/.test(value) && value.length <= 100)
+            return BigInt(value);
+        throw new Error(`${label}: expected an exact integer; use bigint or an integer string for large values`);
+    }
+
     /**
      * Opcode constants for Neurai Script.
      *
@@ -416,12 +428,6 @@ var NeuraiScriptsBundle = (function (exports) {
     });
 
     /**
-     * Low-level Script assembler. Emits the exact byte layout expected by the
-     * Neurai interpreter: pushdata prefixes follow the same rules as Bitcoin
-     * (direct push for 1..75 bytes, OP_PUSHDATA1/2/4 otherwise), and integers
-     * are minimally-encoded as CScriptNum.
-     */
-    /**
      * Minimal CScriptNum encoding (Bitcoin consensus rules).
      *
      * - 0 → empty vector
@@ -430,7 +436,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * - otherwise: sign-magnitude little-endian, with a sign bit on the last byte
      */
     function encodeScriptNum(value) {
-        let n = typeof value === 'bigint' ? value : BigInt(value);
+        let n = toRawInteger(value, 'ScriptNum');
         if (n === 0n)
             return new Uint8Array();
         const negative = n < 0n;
@@ -484,7 +490,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * when available to match how the node's own templates look on the wire.
      */
     function pushInt(value) {
-        const n = typeof value === 'bigint' ? value : BigInt(value);
+        const n = toRawInteger(value, 'ScriptNum');
         if (n === -1n)
             return Uint8Array.of(OP_1NEGATE);
         if (n === 0n)
@@ -800,6 +806,8 @@ var NeuraiScriptsBundle = (function (exports) {
         }
         return concatBytes(Uint8Array.of(OP_HASH160, 0x14), redeemScriptHash160, Uint8Array.of(OP_EQUAL));
     }
+
+    /** Exact monetary primitives. This module has no runtime dependencies. */
 
     // base-x encoding / decoding
     // Copyright (c) 2018 base-x contributors

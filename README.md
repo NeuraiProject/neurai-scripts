@@ -616,3 +616,11 @@ consumable; callers import directly from the package root.
 ## License
 
 MIT — same terms as the rest of the `@neuraiproject/*` libraries.
+
+### Large numeric script values
+
+Use bigint for ScriptNum values above Number.MAX_SAFE_INTEGER. Numeric inputs
+must be safe integers; unsafe numbers are rejected before encoding. Covenant
+amounts and prices remain bigint. The script interpreter's own size and
+arithmetic limits still apply; encoding an integer does not guarantee a script
+will pass consensus checks.

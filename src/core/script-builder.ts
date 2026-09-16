@@ -1,3 +1,4 @@
+import { toRawInteger } from '@neuraiproject/neurai-create-transaction/amounts';
 /**
  * Low-level Script assembler. Emits the exact byte layout expected by the
  * Neurai interpreter: pushdata prefixes follow the same rules as Bitcoin
@@ -17,7 +18,7 @@ import { OP_0, OP_1NEGATE, OP_1, OP_16 } from './opcodes.js';
  * - otherwise: sign-magnitude little-endian, with a sign bit on the last byte
  */
 export function encodeScriptNum(value: bigint | number): Uint8Array {
-  let n = typeof value === 'bigint' ? value : BigInt(value);
+  let n = toRawInteger(value, 'ScriptNum');
   if (n === 0n) return new Uint8Array();
 
   const negative = n < 0n;
@@ -79,7 +80,7 @@ export function pushBytes(data: Uint8Array): Uint8Array {
  * when available to match how the node's own templates look on the wire.
  */
 export function pushInt(value: bigint | number): Uint8Array {
-  const n = typeof value === 'bigint' ? value : BigInt(value);
+  const n = toRawInteger(value, 'ScriptNum');
   if (n === -1n) return Uint8Array.of(OP_1NEGATE);
   if (n === 0n) return Uint8Array.of(OP_0);
   if (n >= 1n && n <= 16n) {

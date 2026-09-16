@@ -1,6 +1,6 @@
 {
   "name": "@neuraiproject/neurai-scripts",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Script-assembly library for Neurai: opcode constants, ScriptBuilder, standard scripts (P2PKH, P2WPKH, P2WSH, AuthScript, multisig, OP_RETURN) and covenants (partial-fill sell orders, legacy + PQ) targeting the DePIN-Test opcode set",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -36,7 +36,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@neuraiproject/neurai-create-transaction": "^0.8.0"
+    "@neuraiproject/neurai-create-transaction": "^0.8.1"
   },
   "keywords": [
     "neurai",
@@ -60,13 +60,13 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@neuraiproject/neurai-key": "^4.0.0",
+    "@neuraiproject/neurai-key": "^4.0.1",
     "@rollup/plugin-commonjs": "^28.0.8",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "bech32": "^2.0.0",
     "bs58check": "^4.0.0",
     "rollup": "^4.52.4",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }
