@@ -12,7 +12,7 @@ import {
 } from '../src/index.js';
 import { bytesToHex } from '../src/core/bytes.js';
 import type { PartialFillOrderPQParams } from '../src/types.js';
-import { testnetAuthScriptAddress } from './helpers.js';
+import { testnetAuthScriptAddress, testnetStrictECDSAAddress, testnetStrictPQAddress } from './helpers.js';
 
 // Valid Neurai testnet P2PKH (byte prefix 127 → "t..."). Reused across the
 // neurai-create-transaction test suite.
@@ -141,6 +141,30 @@ describe('buildPartialFillScriptPQ', () => {
     expect(parsed.tokenId).toBe('CAT');
     expect(parsed.unitPriceSats).toBe(100_000_000n);
     expect(bytesToHex(parsed.pubKeyCommitment)).toBe('cc'.repeat(32));
+  });
+
+  it.each([
+    { label: 'strict PQ v2 (tpq1z…)', build: testnetStrictPQAddress, opcode: 0x52, kind: 'pq' },
+    { label: 'strict ECDSA v3 (tnq1r…)', build: testnetStrictECDSAAddress, opcode: 0x53, kind: 'ecdsa' }
+  ])('hardcodes the witness version of a $label paymentAddress', ({ build, opcode, kind }) => {
+    const program = new Uint8Array(32).fill(0xab);
+    const address = build(program);
+    expect(encodeSellerScriptPubKey(address)).toMatchObject({ kind, witnessVersion: opcode - 0x50 });
+
+    const parsed = parsePartialFillScriptPQ(
+      buildPartialFillScriptPQHex({ ...baseParams, paymentAddress: address })
+    );
+    // OP_n 0x20 <program>: paying the same program under OP_1 would be a
+    // different (wrong) destination.
+    expect(parsed.paymentScriptPubKey.length).toBe(34);
+    expect(parsed.paymentScriptPubKey[0]).toBe(opcode);
+    expect(parsed.paymentScriptPubKey[1]).toBe(0x20);
+    expect(bytesToHex(parsed.paymentScriptPubKey.slice(2))).toBe('ab'.repeat(32));
+  });
+
+  it('rejects the pre-5.0 tnq1p… encoding of a generic AuthScript paymentAddress', () => {
+    const old = 'tnq1p83wfxfypfr3tqpwakdgmk5r0pwpsemq5ngdsx7gef8yc84pndfmqjer8rk';
+    expect(() => buildPartialFillScriptPQ({ ...baseParams, paymentAddress: old })).toThrow(/tnc1p/);
   });
 
   it('still builds end-to-end with a legacy P2PKH paymentAddress', () => {

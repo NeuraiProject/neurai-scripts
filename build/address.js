@@ -4,9 +4,12 @@
  * scriptPubKey bytes a covenant needs to hardcode. The actual
  * scriptPubKey encoders live in `./standard/*`; this module delegates.
  *
- * Two destination types are supported for the payment output (output[0]):
- *   - Legacy P2PKH (base58check)
- *   - AuthScript witness v1 (bech32m)
+ * Every Neurai destination type is supported for the payment output
+ * (output[0]):
+ *   - Legacy P2PKH (base58check)                     → `76a914<20>88ac`
+ *   - Generic AuthScript witness v1 (nc1p… / tnc1p…) → `5120<32>`
+ *   - Strict PQ witness v2 (pq1z… / tpq1z…)          → `5220<32>`
+ *   - Strict ECDSA witness v3 (nq1r… / tnq1r…)       → `5320<32>`
  */
 import { decodeAddress } from '@neuraiproject/neurai-create-transaction';
 import { encodeP2PKHScriptPubKey } from './standard/p2pkh.js';
@@ -29,11 +32,14 @@ export function encodeSellerScriptPubKey(address) {
             hash
         };
     }
-    if (decoded.type === 'authscript') {
+    if (decoded.type === 'authscript' || decoded.type === 'pq' || decoded.type === 'ecdsa') {
+        // The witness version is part of the destination: a pq1z… / nq1r…
+        // payment must be hardcoded with OP_2 / OP_3, never with OP_1.
         const program = Uint8Array.from(decoded.program);
         return {
-            kind: 'authscript',
-            bytes: encodeAuthScriptScriptPubKey(program),
+            kind: decoded.type,
+            witnessVersion: decoded.witnessVersion,
+            bytes: encodeAuthScriptScriptPubKey(program, decoded.witnessVersion),
             hash: program
         };
     }

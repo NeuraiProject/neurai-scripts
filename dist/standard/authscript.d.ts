@@ -1,8 +1,15 @@
 /**
- * AuthScript (witness v1) scriptPubKey + witness-stack builders.
+ * AuthScript scriptPubKey + witness-stack builders.
  *
- * AuthScript outputs encode a 32-byte commitment in a witness v1 program:
- *   scriptPubKey = OP_1 0x20 <32-byte program>
+ * AuthScript outputs encode a 32-byte commitment in a witness program:
+ *   scriptPubKey = OP_n 0x20 <32-byte program>
+ *
+ *   OP_1  generic AuthScript v1 (nc1p… / tnc1p…): any auth type, any witnessScript
+ *   OP_2  strict PQ v2 (pq1z… / tpq1z…): auth type 0x01, witnessScript OP_TRUE
+ *   OP_3  strict ECDSA v3 (nq1r… / tnq1r…): auth type 0x02, witnessScript OP_TRUE
+ *
+ * The witness version is also the first byte of the commitment preimage:
+ *   tagged_hash("NeuraiAuthScript", version || auth_descriptor || SHA256(witnessScript))
  *
  * The program is `HASH160`/`SHA256` over a descriptor that depends on the
  * `auth_type` byte carried as the first witness-stack element at spend time.
@@ -28,7 +35,13 @@ export declare const AUTHSCRIPT_LEGACY = 2;
 /** NIP-015: reference-script spend mode. Not yet activated in consensus. */
 export declare const AUTHSCRIPT_REF = 3;
 export type AuthType = typeof AUTHSCRIPT_NOAUTH | typeof AUTHSCRIPT_PQ | typeof AUTHSCRIPT_LEGACY | typeof AUTHSCRIPT_REF;
-export declare function encodeAuthScriptScriptPubKey(program: Uint8Array): Uint8Array;
+/** AuthScript witness version: 1 generic, 2 strict PQ, 3 strict ECDSA. */
+export type AuthScriptWitnessVersion = 1 | 2 | 3;
+/**
+ * `OP_n 0x20 <program>` for witness version `n`. Defaults to the generic
+ * AuthScript v1 (`OP_1`), which is what every covenant commits to.
+ */
+export declare function encodeAuthScriptScriptPubKey(program: Uint8Array, witnessVersion?: AuthScriptWitnessVersion): Uint8Array;
 export interface AuthScriptWitnessLegacyInput {
     /** DER-encoded secp256k1 signature WITH trailing sighash byte. */
     signature: Uint8Array;
@@ -70,6 +83,34 @@ export declare function buildAuthScriptWitnessLegacy(input: AuthScriptWitnessLeg
  * stack elements and may each be up to 3072 B.
  */
 export declare function buildAuthScriptWitnessPQ(input: AuthScriptWitnessPQInput): Uint8Array[];
+/** Length of the versioned ML-DSA-44 pubkey the node expects (0x05 prefix + 1312 B). */
+export declare const STRICT_PQ_PUBKEY_LENGTH = 1313;
+/** Version prefix of an ML-DSA-44 pubkey on the witness stack. */
+export declare const PQ_PUBKEY_PREFIX = 5;
+export interface StrictWitnessPQInput {
+    /** ML-DSA-44 signature WITH trailing sighash byte. */
+    signature: Uint8Array;
+    /** Versioned PQ pubkey: 0x05 prefix + 1312-byte ML-DSA-44 key (1313 B). */
+    pubKey: Uint8Array;
+}
+export interface StrictWitnessECDSAInput {
+    /** DER-encoded secp256k1 signature WITH trailing sighash byte. */
+    signature: Uint8Array;
+    /** Compressed secp256k1 public key (33 B). */
+    pubKey: Uint8Array;
+}
+/**
+ * Witness stack for spending a strict PQ witness v2 output (`pq1z…`):
+ * exactly `[0x01, sig, pubKey, OP_TRUE]`. The node rejects any other
+ * shape (extra arguments, another witnessScript) for the strict families.
+ */
+export declare function buildStrictWitnessPQ(input: StrictWitnessPQInput): Uint8Array[];
+/**
+ * Witness stack for spending a strict ECDSA witness v3 output (`nq1r…`):
+ * exactly `[0x02, sig, pubKey33, OP_TRUE]`. The node rejects uncompressed
+ * keys for this family.
+ */
+export declare function buildStrictWitnessECDSA(input: StrictWitnessECDSAInput): Uint8Array[];
 /**
  * Build the witness stack for a NoAuth AuthScript spend. The spend is gated
  * by the witnessScript alone (covenants, hash-locks, time-locks, ...); no

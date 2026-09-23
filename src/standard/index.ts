@@ -8,17 +8,24 @@ export {
   buildAuthScriptWitnessPQ,
   buildAuthScriptWitnessNoAuth,
   buildAuthScriptWitnessRef,
+  buildStrictWitnessPQ,
+  buildStrictWitnessECDSA,
   AUTHSCRIPT_NOAUTH,
   AUTHSCRIPT_PQ,
   AUTHSCRIPT_LEGACY,
-  AUTHSCRIPT_REF
+  AUTHSCRIPT_REF,
+  STRICT_PQ_PUBKEY_LENGTH,
+  PQ_PUBKEY_PREFIX
 } from './authscript.js';
 export type {
   AuthType,
+  AuthScriptWitnessVersion,
   AuthScriptWitnessLegacyInput,
   AuthScriptWitnessPQInput,
   AuthScriptWitnessNoAuthInput,
-  AuthScriptWitnessRefInput
+  AuthScriptWitnessRefInput,
+  StrictWitnessPQInput,
+  StrictWitnessECDSAInput
 } from './authscript.js';
 
 export {

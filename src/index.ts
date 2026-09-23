@@ -39,10 +39,14 @@ export {
   buildAuthScriptWitnessPQ,
   buildAuthScriptWitnessNoAuth,
   buildAuthScriptWitnessRef,
+  buildStrictWitnessPQ,
+  buildStrictWitnessECDSA,
   AUTHSCRIPT_NOAUTH,
   AUTHSCRIPT_PQ,
   AUTHSCRIPT_LEGACY,
   AUTHSCRIPT_REF,
+  STRICT_PQ_PUBKEY_LENGTH,
+  PQ_PUBKEY_PREFIX,
   encodeNullDataScript,
   NULLDATA_STANDARD_MAX_SIZE,
   encodeMultisigRedeemScript,
@@ -53,10 +57,13 @@ export {
 
 export type {
   AuthType,
+  AuthScriptWitnessVersion,
   AuthScriptWitnessLegacyInput,
   AuthScriptWitnessPQInput,
   AuthScriptWitnessNoAuthInput,
   AuthScriptWitnessRefInput,
+  StrictWitnessPQInput,
+  StrictWitnessECDSAInput,
   EncodeNullDataOptions,
   MultisigParams
 } from './standard/index.js';

@@ -22,7 +22,9 @@ and sign with
 > are gated by consensus flags active in **testnet / regtest** today.
 > Mainnet activation follows the fork process described in the NIPs. The
 > library accepts both `xna-test` and `xna` networks so the same call sites
-> work once mainnet activates.
+> work once mainnet activates. Here those labels only name the chain
+> (mainnet / testnet-regtest); in neurai-key 5 `xna` also names the ECDSA
+> witness v3 address type.
 
 ---
 
@@ -211,9 +213,24 @@ const spk = encodeP2WPKHScriptPubKey(pubKeyHash20);
 const spk = encodeP2WSHScriptPubKey(sha256(witnessScript));
 ```
 
-### AuthScript — `encodeAuthScriptScriptPubKey(program32)` + witness builders
+### AuthScript — `encodeAuthScriptScriptPubKey(program32, witnessVersion?)` + witness builders
 
-`scriptPubKey` layout: `OP_1 0x20 <32-byte program>`.
+`scriptPubKey` layout: `OP_n 0x20 <32-byte program>`, with the witness
+version of the address family:
+
+| Witness | Opcode | Address | Spend |
+|---|---|---|---|
+| v1 (default) | `OP_1` | `nc1p…` / `tnc1p…` | generic: any auth type, any witnessScript (covenants) |
+| v2 | `OP_2` | `pq1z…` / `tpq1z…` | strict PQ: exactly `[0x01, sig, pubKey, OP_TRUE]` |
+| v3 | `OP_3` | `nq1r…` / `tnq1r…` | strict ECDSA: exactly `[0x02, sig, pubKey33, OP_TRUE]` |
+
+`buildStrictWitnessPQ({ signature, pubKey })` and
+`buildStrictWitnessECDSA({ signature, pubKey })` build the fixed 4-item stacks
+of the strict families (the PQ key must be the 1313-byte `0x05`-prefixed key,
+the ECDSA key must be compressed). Strict v2 / v3 are active on regtest only
+today; generic v1 on testnet and regtest.
+
+Generic AuthScript v1 spend modes, selected by a 1-byte `auth_type` in the witness stack:
 
 Four spend modes, selected by a 1-byte `auth_type` in the witness stack:
 
@@ -503,7 +520,7 @@ are active on DePIN-Test testnet.
 | Cancel sig scheme | ECDSA secp256k1 | ML-DSA-44 (~2421 B sig, ~1313 B pubkey) |
 | Cancel verifier | `OP_DUP OP_HASH160 <PKH> OP_EQUALVERIFY OP_CHECKSIG` | `OP_DUP OP_SHA256 <commitment> OP_EQUALVERIFY <selector> OP_TXHASH OP_SWAP OP_CHECKSIGFROMSTACK` |
 | What Alice signs | tx sighash (standard) | `SHA256(OP_TXHASH(selector))` — CSFS single-SHA256s the message |
-| Payment destination | P2PKH only | P2PKH **or** AuthScript bech32m (scriptPubKey bytes hardcoded) |
+| Payment destination | P2PKH only | P2PKH **or** any AuthScript bech32m address — `nc1p` v1, `pq1z` v2, `nq1r` v3 (scriptPubKey bytes hardcoded, `OP_1`/`OP_2`/`OP_3` included) |
 
 ```ts
 import {
@@ -516,7 +533,7 @@ import {
 
 const scriptPubKeyHex = buildPartialFillScriptPQHex({
   network: 'xna-test',
-  paymentAddress: 'tnq1...',               // AuthScript bech32m, or legacy "t..." P2PKH
+  paymentAddress: 'tpq1z...',              // tnc1p… / tpq1z… / tnq1r… bech32m, or legacy "t..." P2PKH
   pubKeyCommitment: sha256(alicePQPubKey), // 32 bytes
   tokenId: 'CAT',
   unitPriceSats: 100_000_000n,
@@ -552,7 +569,8 @@ OP_ENDIF
 ## Network handling
 
 Builders take address strings (whose prefix already encodes the network:
-`t.../N...` for P2PKH, `tnq1.../nq1...` for AuthScript bech32m) and
+`t.../N...` for P2PKH; `tnc1p/nc1p` (v1), `tpq1z/pq1z` (v2) and
+`tnq1r/nq1r` (v3) for AuthScript bech32m) and
 validate them via `decodeAddress` from `neurai-create-transaction`. No
 builder accepts a separate `network` parameter — it would be redundant
 with the address and invite silent mismatches.
@@ -563,7 +581,8 @@ network*: a legacy covenant is opcodes plus a 20-byte PKH, a PQ covenant
 is opcodes plus a 32-byte commitment and raw payment-scriptPubKey bytes,
 and neither payload differs between mainnet and testnet. The parser
 receives `network` purely so the caller can later base58-encode
-`sellerPubKeyHash` against the right version byte, or interpret
+`sellerPubKeyHash` against the right version byte (a Legacy address,
+neurai-key `xna-legacy` / `xna-legacy-test`), or interpret
 `paymentScriptPubKey` in the correct bech32m/base58 context.
 
 Keep this split intact when adding new covenants: builders reject a
@@ -587,7 +606,7 @@ Keep this split intact when adding new covenants: builders reject a
   testnet today — no `-acceptnonstdtxn=1` required. The legacy 80 B cap
   only applies when CSFS is off.
 - **Commitment choice (PQ).** The PQ covenant commits to
-  `SHA256(pubKey)`, not the witness-v1 bech32m program. That keeps the
+  `SHA256(pubKey)`, not the bech32m AuthScript program. That keeps the
   covenant decoupled from AuthScript address derivation and lets the
   caller use any PQ key whose SHA256 they can compute.
 
@@ -612,6 +631,26 @@ The top-level `src/index.ts` barrel should re-export everything publicly
 consumable; callers import directly from the package root.
 
 ---
+
+## Version notes
+
+### 0.9.0
+
+Address types of neurai-key 5 / neurai-create-transaction 0.9.0.
+
+- `encodeSellerScriptPubKey` keeps the witness version of the address:
+  `pq1z…` payment addresses are hardcoded as `OP_2 <32B>` and `nq1r…` as
+  `OP_3 <32B>` (a same-program `OP_1` script would be another destination).
+  `SellerAddressKind` gains `'pq'` and `'ecdsa'`, and the result carries
+  `witnessVersion`. Code that switched on `kind === 'authscript'` to mean
+  "any bech32m destination" must handle the new kinds.
+- Generic AuthScript v1 addresses are `nc1p…` / `tnc1p…`. The pre-5.0
+  `nq1p…` / `tnq1p…` strings are rejected (by create-transaction's
+  `decodeAddress`), like in the node.
+- `encodeAuthScriptScriptPubKey(program, witnessVersion = 1)`; new
+  `buildStrictWitnessPQ` / `buildStrictWitnessECDSA` for the strict families.
+- Requires `@neuraiproject/neurai-create-transaction` `^0.9.0` (breaking
+  release, not matched by the previous `^0.8.1` range).
 
 ## License
 

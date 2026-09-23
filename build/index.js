@@ -3,7 +3,7 @@ export { bytesToHex, hexToBytes, concatBytes, bytesEqual, ensureHex } from './co
 export { ScriptBuilder, encodeScriptNum, pushBytes, pushInt, pushHex } from './core/script-builder.js';
 export * as opcodes from './core/opcodes.js';
 // ---------- Standard scripts ----------
-export { encodeP2PKHScriptPubKey, encodeP2WPKHScriptPubKey, encodeP2WSHScriptPubKey, encodeAuthScriptScriptPubKey, buildAuthScriptWitnessLegacy, buildAuthScriptWitnessPQ, buildAuthScriptWitnessNoAuth, buildAuthScriptWitnessRef, AUTHSCRIPT_NOAUTH, AUTHSCRIPT_PQ, AUTHSCRIPT_LEGACY, AUTHSCRIPT_REF, encodeNullDataScript, NULLDATA_STANDARD_MAX_SIZE, encodeMultisigRedeemScript, encodeMultisigRedeemScriptHex, encodeP2SHScriptPubKey, MULTISIG_MAX_PUBKEYS } from './standard/index.js';
+export { encodeP2PKHScriptPubKey, encodeP2WPKHScriptPubKey, encodeP2WSHScriptPubKey, encodeAuthScriptScriptPubKey, buildAuthScriptWitnessLegacy, buildAuthScriptWitnessPQ, buildAuthScriptWitnessNoAuth, buildAuthScriptWitnessRef, buildStrictWitnessPQ, buildStrictWitnessECDSA, AUTHSCRIPT_NOAUTH, AUTHSCRIPT_PQ, AUTHSCRIPT_LEGACY, AUTHSCRIPT_REF, STRICT_PQ_PUBKEY_LENGTH, PQ_PUBKEY_PREFIX, encodeNullDataScript, NULLDATA_STANDARD_MAX_SIZE, encodeMultisigRedeemScript, encodeMultisigRedeemScriptHex, encodeP2SHScriptPubKey, MULTISIG_MAX_PUBKEYS } from './standard/index.js';
 // ---------- Address helpers (thin wrapper around standard/*) ----------
 export { encodeSellerScriptPubKey } from './address.js';
 // ---------- Asset-transfer wrapper ----------

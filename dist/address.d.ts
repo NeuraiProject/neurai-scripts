@@ -4,15 +4,25 @@
  * scriptPubKey bytes a covenant needs to hardcode. The actual
  * scriptPubKey encoders live in `./standard/*`; this module delegates.
  *
- * Two destination types are supported for the payment output (output[0]):
- *   - Legacy P2PKH (base58check)
- *   - AuthScript witness v1 (bech32m)
+ * Every Neurai destination type is supported for the payment output
+ * (output[0]):
+ *   - Legacy P2PKH (base58check)                     → `76a914<20>88ac`
+ *   - Generic AuthScript witness v1 (nc1p… / tnc1p…) → `5120<32>`
+ *   - Strict PQ witness v2 (pq1z… / tpq1z…)          → `5220<32>`
+ *   - Strict ECDSA witness v3 (nq1r… / tnq1r…)       → `5320<32>`
  */
 import { encodeP2PKHScriptPubKey } from './standard/p2pkh.js';
 import { encodeAuthScriptScriptPubKey } from './standard/authscript.js';
-export type SellerAddressKind = 'p2pkh' | 'authscript';
+import type { AuthScriptWitnessVersion } from './standard/authscript.js';
+/**
+ * `authscript` is the generic witness v1; `pq` and `ecdsa` are the strict
+ * witness v2 and v3 families.
+ */
+export type SellerAddressKind = 'p2pkh' | 'authscript' | 'pq' | 'ecdsa';
 export interface SellerScriptPubKey {
     kind: SellerAddressKind;
+    /** Witness version of an AuthScript destination (1, 2 or 3). */
+    witnessVersion?: AuthScriptWitnessVersion;
     /** Raw scriptPubKey bytes that output[0] of a fill tx must equal. */
     bytes: Uint8Array;
     /**

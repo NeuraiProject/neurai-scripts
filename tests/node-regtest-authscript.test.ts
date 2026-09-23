@@ -182,7 +182,7 @@ describe.skipIf(MODE === 'skip')('AuthScript NoAuth covenant e2e (deposit + witn
     // 2. Deposit: 5 CARGO + 1 XNA (future fee) into the NoAuth commitment,
     //    derived with neurai-key's public API. Plain transfers/payments legs.
     const witnessScript = hexToBytes(WITNESS_SCRIPT_HEX);
-    const noauth = getNoAuthAddress('xna-pq-test', { witnessScript });
+    const noauth = getNoAuthAddress('xna-authscript-test', { witnessScript });
 
     const asset = assetUtxo(D, 'CARGO');
     const fees = xnaUtxo(D, 5);

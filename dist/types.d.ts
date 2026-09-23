@@ -1,5 +1,10 @@
 /**
- * Neurai network discriminator.
+ * Neurai chain discriminator: `xna` = mainnet, `xna-test` = testnet/regtest.
+ *
+ * Only the chain matters here. In neurai-key 5 the label `xna` also names
+ * the ECDSA witness v3 address type; parsed P2PKH hashes are formatted as
+ * Legacy Base58 (neurai-key `xna-legacy` / `xna-legacy-test`) whatever this
+ * label says.
  *
  * This type intentionally appears only on the **parse side** of the API —
  * as an optional argument to the parsers and as a field on the parsed
@@ -44,10 +49,11 @@ export interface PartialFillOrderParams {
     /**
      * Seller destination. Must be a legacy P2PKH address (base58check,
      * "t..." on testnet, "N..." on mainnet). The legacy covenant uses
-     * `OP_HASH160 + OP_CHECKSIG` in its cancel branch, so AuthScript
-     * bech32m addresses are rejected — use `buildPartialFillScriptPQ` for
-     * post-quantum / AuthScript destinations. The decoded 20-byte PKH is
-     * hardcoded into the covenant (cancel branch + payment scriptPubKey).
+     * `OP_HASH160 + OP_CHECKSIG` in its cancel branch, so every bech32m
+     * address (AuthScript v1 `nc1p…`, PQ v2 `pq1z…` and ECDSA v3 `nq1r…`,
+     * whose program is a commitment, not a key hash) is rejected — use
+     * `buildPartialFillScriptPQ` for those destinations. The decoded 20-byte
+     * PKH is hardcoded into the covenant (cancel branch + payment scriptPubKey).
      */
     sellerAddress: string;
     /** Name of the asset being sold (e.g. "CAT"). */
@@ -111,9 +117,11 @@ export interface TxInputRef {
  */
 export interface PartialFillOrderPQParams {
     /**
-     * Destination for the XNA payment to the seller. Can be legacy P2PKH
-     * (`N.../t...`) OR AuthScript bech32m v1 (`nq1.../tnq1...`). The covenant
-     * hardcodes the full scriptPubKey bytes either way.
+     * Destination for the XNA payment to the seller: legacy P2PKH
+     * (`N.../t...`), generic AuthScript v1 (`nc1p.../tnc1p...`), strict PQ v2
+     * (`pq1z.../tpq1z...`) or strict ECDSA v3 (`nq1r.../tnq1r...`). The
+     * covenant hardcodes the full scriptPubKey bytes (`OP_1`/`OP_2`/`OP_3`
+     * prefix included) either way.
      */
     paymentAddress: string;
     /**

@@ -6,8 +6,8 @@
  *     <prefix scriptPubKey bytes> OP_XNA_ASSET <pushdata(payload)> OP_DROP
  *
  * where `prefix` is the recipient's standard script (typically a P2PKH, an
- * AuthScript witness v1, or a bare covenant such as the partial-fill sell
- * order), and `payload` serializes a `CAssetTransfer`:
+ * AuthScript `OP_1`/`OP_2`/`OP_3` witness program, or a bare covenant such
+ * as the partial-fill sell order), and `payload` serializes a `CAssetTransfer`:
  *
  *     payload = marker ("rvn" 0x72 0x76 0x6e | "xna" 0x78 0x6e 0x61)
  *             || type_marker (0x74 transfer)
