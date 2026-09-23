@@ -634,6 +634,18 @@ consumable; callers import directly from the package root.
 
 ## Version notes
 
+### 0.9.1
+
+TypeScript declarations for CommonJS. `require()` loads `dist/index.cjs`, but
+the package only published ESM declarations, so a CommonJS file compiled with
+`moduleResolution: "node16"` got `TS1471` and no types. Each condition of
+`exports` now has its own declarations (`import` → `dist/index.d.ts`,
+`require` → `dist/index.d.cts`). No runtime or API change. `npm run
+test:types` compiles ESM, CommonJS and browser consumers against the built
+declarations (NodeNext, Node16, Bundler; `skipLibCheck: false`) and `npm run
+test:package` checks the packed tarball in a clean project, with TypeScript
+4.7 too.
+
 ### 0.9.0
 
 Address types of neurai-key 5 / neurai-create-transaction 0.9.0.

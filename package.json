@@ -1,6 +1,6 @@
 {
   "name": "@neuraiproject/neurai-scripts",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Script-assembly library for Neurai: opcode constants, ScriptBuilder, standard scripts (P2PKH, P2WPKH, P2WSH, AuthScript, multisig, OP_RETURN) and covenants (partial-fill sell orders, legacy + PQ) targeting the DePIN-Test opcode set",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -9,9 +9,14 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./browser": {
       "types": "./dist/index.d.ts",
@@ -27,11 +32,13 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && rollup -c rollup.config.mjs",
+    "build": "tsc -p tsconfig.json && rollup -c rollup.config.mjs && rollup -c rollup.dts.config.mjs",
     "build:ts": "tsc -p tsconfig.json",
     "prepack": "npm run build",
     "prepublishOnly": "npm run build",
-    "test": "npm run build && vitest run",
+    "test": "npm run build && vitest run && npm run test:types",
+    "test:types": "tsc -p tsconfig.types.json && tsc -p tsconfig.types-node16.json && tsc -p tsconfig.types-bundler.json",
+    "test:package": "npm run build && node scripts/check-package.mjs",
     "test:run": "vitest run",
     "test:watch": "vitest"
   },
@@ -66,6 +73,7 @@
     "bech32": "^2.0.0",
     "bs58check": "^4.0.0",
     "rollup": "^4.52.4",
+    "rollup-plugin-dts": "^6.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }
