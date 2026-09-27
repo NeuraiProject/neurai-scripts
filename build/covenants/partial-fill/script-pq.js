@@ -31,7 +31,7 @@ import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_CHECKSIGFROMSTACK, OP_DROP, OP_D
 import { ScriptBuilder } from '../../core/script-builder.js';
 import { appendExpirationGate, assertExpiration } from './expiration.js';
 const ASSET_NAME_MAX = 32;
-export const DEFAULT_PQ_TXHASH_SELECTOR = 0xff;
+export const DEFAULT_PQ_TXHASH_SELECTOR = 0x1ff;
 function assertCommitment(commitment) {
     if (!(commitment instanceof Uint8Array) || commitment.length !== 32) {
         throw new Error('pubKeyCommitment must be a 32-byte Uint8Array (SHA256 of pubKey)');
@@ -60,11 +60,11 @@ function assertPrice(priceSats) {
     }
 }
 function assertSelector(selector) {
-    if (!Number.isInteger(selector) || selector < 0 || selector > 0xff) {
-        throw new Error('txHashSelector must be a single byte (0x00..0xff)');
+    if (!Number.isInteger(selector) || selector < 0 || selector > 0x1ff) {
+        throw new Error('txHashSelector must be in the NIP-042 range (0x001..0x1ff)');
     }
     if (selector === 0) {
-        throw new Error('txHashSelector 0x00 is rejected by OP_TXHASH');
+        throw new Error('txHashSelector 0x000 is rejected by OP_TXHASH');
     }
 }
 /**
@@ -84,16 +84,14 @@ export function buildPartialFillScriptPQ(params) {
     // scriptSig: <sigPQ> <pubKeyPQ> <1>
     // After OP_IF consumes the flag: [ sig, pubKey ]
     //
-    // The selector MUST be pushed as a raw 1-byte element — consensus rejects
-    // any stack item of size ≠ 1. Using `pushInt(selector)` would work for
-    // 1..127 but emit a 2-byte CScriptNum for 0x80..0xff (sign-disambiguation
-    // pad), which makes OP_TXHASH fail with SCRIPT_ERR_TXHASH.
+    // NIP-042 consumes exactly two raw little-endian bytes. CScriptNum and
+    // OP_N encodings are invalid even when they represent the same mask.
     b.op(OP_IF)
         .op(OP_DUP) // [ sig, pubKey, pubKey ]
         .op(OP_SHA256) // [ sig, pubKey, H(pubKey) ]
         .pushBytes(pubKeyCommitment) // [ sig, pubKey, H(pubKey), commitment ]
         .op(OP_EQUALVERIFY) // [ sig, pubKey ]
-        .pushBytes(Uint8Array.of(txHashSelector)) // [ sig, pubKey, selector ]
+        .pushBytes(Uint8Array.of(txHashSelector & 0xff, txHashSelector >> 8)) // [ sig, pubKey, selector ]
         .op(OP_TXHASH) // [ sig, pubKey, txHash ]
         .op(OP_SWAP) // [ sig, txHash, pubKey ]
         .op(OP_CHECKSIGFROMSTACK) // [ 1 | 0 ]

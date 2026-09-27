@@ -42,8 +42,7 @@ import {
   expectByte,
   makeCursor,
   readPush,
-  readPushPositiveInt,
-  readPushUint8
+  readPushPositiveInt
 } from '../../core/script-parser.js';
 import type { Network, ParsedPartialFillOrderPQ } from '../../types.js';
 import {
@@ -83,9 +82,13 @@ export function parsePartialFillScriptPQ(
     throw new Error(`parse-pq: pubKeyCommitment must be 32 bytes, got ${pubKeyCommitment.length}`);
   }
   expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (cancel)');
-  const txHashSelector = readPushUint8(c, 'txHashSelector');
-  if (txHashSelector < 1) {
-    throw new Error(`parse-pq: txHashSelector 0x00 is rejected by OP_TXHASH`);
+  const selectorBytes = readPush(c, 'txHashSelector');
+  if (selectorBytes.length !== 2) {
+    throw new Error(`parse-pq: txHashSelector must be a two-byte LE push, got ${selectorBytes.length} bytes`);
+  }
+  const txHashSelector = selectorBytes[0] | (selectorBytes[1] << 8);
+  if (txHashSelector === 0 || txHashSelector > 0x1ff) {
+    throw new Error(`parse-pq: txHashSelector 0x${txHashSelector.toString(16)} is rejected by OP_TXHASH`);
   }
   expectByte(c, OP_TXHASH, 'OP_TXHASH');
   expectByte(c, OP_SWAP, 'OP_SWAP');

@@ -26,7 +26,7 @@
  * `./script.ts` for the three-branch layout description.
  */
 import type { PartialFillOrderPQParams } from '../../types.js';
-export declare const DEFAULT_PQ_TXHASH_SELECTOR = 255;
+export declare const DEFAULT_PQ_TXHASH_SELECTOR = 511;
 /**
  * Build the scriptPubKey of a PQ Partial-Fill Sell Order covenant UTXO.
  */

@@ -10,7 +10,7 @@
  */
 import { bytesEqual, bytesToHex, hexToBytes } from '../../core/bytes.js';
 import { OP_0, OP_1, OP_2, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
-import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt, readPushUint8 } from '../../core/script-parser.js';
+import { assertTrailing, expectByte, makeCursor, readPush, readPushPositiveInt } from '../../core/script-parser.js';
 import { assertSameExpiration, readOptionalExpirationGate } from './expiration.js';
 /** Quick discriminator without throwing — useful for indexers. */
 export function isPartialFillScriptPQ(script) {
@@ -37,9 +37,13 @@ export function parsePartialFillScriptPQ(script, network = 'xna-test') {
         throw new Error(`parse-pq: pubKeyCommitment must be 32 bytes, got ${pubKeyCommitment.length}`);
     }
     expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (cancel)');
-    const txHashSelector = readPushUint8(c, 'txHashSelector');
-    if (txHashSelector < 1) {
-        throw new Error(`parse-pq: txHashSelector 0x00 is rejected by OP_TXHASH`);
+    const selectorBytes = readPush(c, 'txHashSelector');
+    if (selectorBytes.length !== 2) {
+        throw new Error(`parse-pq: txHashSelector must be a two-byte LE push, got ${selectorBytes.length} bytes`);
+    }
+    const txHashSelector = selectorBytes[0] | (selectorBytes[1] << 8);
+    if (txHashSelector === 0 || txHashSelector > 0x1ff) {
+        throw new Error(`parse-pq: txHashSelector 0x${txHashSelector.toString(16)} is rejected by OP_TXHASH`);
     }
     expectByte(c, OP_TXHASH, 'OP_TXHASH');
     expectByte(c, OP_SWAP, 'OP_SWAP');

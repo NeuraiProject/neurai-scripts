@@ -146,10 +146,10 @@ export interface PartialFillOrderPQParams {
   /** Price in XNA satoshis per indivisible unit of the asset. */
   unitPriceSats: bigint;
   /**
-   * OP_TXHASH selector byte bound into the script. Default `0xff` (all
-   * eight fields). The seller must sign `SHA256(OP_TXHASH(selector))` with
-   * their PQ key at cancel time. See
-   * `doc/new-opcodes-depin-branch.md` §2.1 for the bit → field mapping.
+   * NIP-042 OP_TXHASH selector bound into the script as exactly two
+   * little-endian bytes. Default `0x1ff` commits all nine fields, including
+   * reference inputs. The seller signs `SHA256(OP_TXHASH(selector))` with
+   * their PQ key at cancel time.
    */
   txHashSelector?: number;
   /**

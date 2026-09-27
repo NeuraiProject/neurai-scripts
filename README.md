@@ -124,15 +124,17 @@ stack, arithmetic, bitwise, crypto) plus every DePIN-Test addition
 `OP_INPUTCOUNT`/`OP_OUTPUTCOUNT`, `OP_OUTPUTASSETFIELD`,
 `OP_INPUTASSETFIELD`, `OP_REFINPUTCOUNT`/`OP_REFINPUTFIELD`/
 `OP_REFINPUTASSETFIELD`, `OP_CHAINCONTEXT`, `OP_CAT`, `OP_SPLIT`,
-`OP_REVERSEBYTES`, 64-bit `OP_MUL`/`OP_DIV`/`OP_MOD`).
+`OP_REVERSEBYTES`, `OP_OUTPUTAUTHDEST`, `OP_ZKVERIFY`, `OP_INPUTFIELD`,
+64-bit `OP_MUL`/`OP_DIV`/`OP_MOD`).
 
 Also exports selector tables:
 
 ```ts
-// For OP_TXFIELD and OP_REFINPUTFIELD
+// For OP_TXFIELD, OP_INPUTFIELD and OP_REFINPUTFIELD
 opcodes.TXFIELD_VALUE                  // 0x01
 opcodes.TXFIELD_AUTHSCRIPT_COMMITMENT  // 0x02
 opcodes.TXFIELD_SCRIPTPUBKEY           // 0x03
+opcodes.TXFIELD_AUTHDEST               // 0x04 (NIP-041)
 
 // For OP_OUTPUTASSETFIELD / OP_INPUTASSETFIELD / OP_REFINPUTASSETFIELD
 opcodes.ASSETFIELD_NAME                // 0x01
@@ -142,13 +144,14 @@ opcodes.ASSETFIELD_REISSUABLE          // 0x04
 opcodes.ASSETFIELD_HAS_IPFS            // 0x05
 opcodes.ASSETFIELD_IPFS_HASH           // 0x06
 opcodes.ASSETFIELD_TYPE                // 0x07
+opcodes.ASSETFIELD_MESSAGE             // 0x08 (NIP-043)
 
 // For OP_CHAINCONTEXT
 opcodes.CHAINCONTEXT_HEIGHT            // 0x01
 opcodes.CHAINCONTEXT_MTP               // 0x02
 opcodes.CHAINCONTEXT_CHAIN_ID          // 0x03
 
-// Bitmask selectors for OP_TXHASH (any non-zero combination is valid)
+// NIP-042: push every OP_TXHASH mask as two raw LE bytes (0x001..0x1ff).
 opcodes.TXHASH_VERSION            // 0x01
 opcodes.TXHASH_LOCKTIME           // 0x02
 opcodes.TXHASH_INPUT_PREVOUTS     // 0x04
@@ -157,7 +160,8 @@ opcodes.TXHASH_OUTPUTS            // 0x10
 opcodes.TXHASH_CURRENT_PREVOUT    // 0x20
 opcodes.TXHASH_CURRENT_SEQUENCE   // 0x40
 opcodes.TXHASH_CURRENT_INDEX      // 0x80
-opcodes.TXHASH_ALL                // 0xff
+opcodes.TXHASH_REFINPUTS          // 0x100
+opcodes.TXHASH_ALL                // 0x1ff
 ```
 
 ### `ScriptBuilder` (`./core/script-builder.ts`)
@@ -227,8 +231,8 @@ version of the address family:
 `buildStrictWitnessPQ({ signature, pubKey })` and
 `buildStrictWitnessECDSA({ signature, pubKey })` build the fixed 4-item stacks
 of the strict families (the PQ key must be the 1313-byte `0x05`-prefixed key,
-the ECDSA key must be compressed). Strict v2 / v3 are active on regtest only
-today; generic v1 on testnet and regtest.
+the ECDSA key must be compressed). All three families activate on the reset testnet at block 10 and on
+regtest at block 1.
 
 Generic AuthScript v1 spend modes, selected by a 1-byte `auth_type` in the witness stack:
 
@@ -537,7 +541,7 @@ const scriptPubKeyHex = buildPartialFillScriptPQHex({
   pubKeyCommitment: sha256(alicePQPubKey), // 32 bytes
   tokenId: 'CAT',
   unitPriceSats: 100_000_000n,
-  txHashSelector: DEFAULT_PQ_TXHASH_SELECTOR  // 0xff = all eight tx fields
+  txHashSelector: DEFAULT_PQ_TXHASH_SELECTOR  // 0x1ff = all nine fields
 });
 
 const cancelScriptSigHex = buildCancelScriptSigPQHex(mlDsa44SigWithSighash, alicePQPubKey);
@@ -555,8 +559,8 @@ OP_IF                                // scriptSig pushed <sig> <pubKey> OP_1
   OP_DUP OP_SHA256
   <pubKeyCommitment 32B>
   OP_EQUALVERIFY
-  <txHashSelector 1B>
-  OP_TXHASH                          // msg = dSHA256(selected_tx_fields)
+  <txHashSelector uint16LE, exactly 2 bytes>
+  OP_TXHASH                          // msg = tagged NeuraiTxHash(mask || fields)
   OP_SWAP
   OP_CHECKSIGFROMSTACK               // verifies sig over SHA256(msg) for pubKey
 OP_ELSE
@@ -633,6 +637,18 @@ consumable; callers import directly from the package root.
 ---
 
 ## Version notes
+
+### 0.9.2
+
+Requires `@neuraiproject/neurai-create-transaction` `^0.9.2` so new
+installations use the reset-testnet activation height and network metadata.
+The asset-wrapper fixtures from the previous testnet remain historical codec
+examples; live transactions must use the asset marker returned by the node for
+the candidate block. NIP-041/043 and NIP-018 opcode constants and selectors
+match the reset node. PQ cancel covenants now push a two-byte NIP-042 mask;
+the default `0x1ff` also commits reference inputs. Historical one-byte masks
+are rejected by the PQ covenant parser because they cannot execute under the
+current `OP_TXHASH` rule.
 
 ### 0.9.1
 

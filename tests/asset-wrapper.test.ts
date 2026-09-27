@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { splitAssetWrappedScriptPubKey } from '../src/index.js';
 
-// Real testnet UTXOs captured via neurai-cli -testnet getaddressutxos on
-// block 12814. Used as golden fixtures: any regression in the split will
+// Historical testnet UTXOs captured before the 2026 reset via neurai-cli
+// -testnet getaddressutxos on block 12814. These are codec fixtures only;
+// they are not expected to exist on the reset chain. Any regression will
 // fail these first.
 const REAL_PQ_TREST_SPK =
   '51201592eed3297863e3cf37dcd9ebc71b672e43f5e27f5d4bb08d8c79ad77fc3a2e' + // OP_1 OP_PUSHBYTES_32 <program>
@@ -20,7 +21,7 @@ const REAL_LEGACY_TREST_SPK =
   'c0' + '12' + '72766e7405545245535400e40b540200000075';
 const REAL_LEGACY_PREFIX = '76a914d57bac106ec4abbf707d4056444cd3e9f9659ec388ac';
 
-// Real testnet UTXOs for &DEPINTESTING on both sides of NIP-040:
+// Historical pre-reset testnet UTXOs for &DEPINTESTING on both sides of NIP-040:
 // height 271465 uses rvn; height 324809 uses xna.
 const REAL_RVN_DEPINTESTING_SPK =
   '76a91445c89b4d678640a084759f2fe7d1d279c3d9206388ac' +
@@ -31,7 +32,7 @@ const REAL_XNA_DEPINTESTING_SPK =
   'c0' + '1a' + '786e6174' + '0d' + '26444550494e54455354494e47' +
   '003ba53018090000' + '75';
 
-describe('splitAssetWrappedScriptPubKey — real testnet fixtures', () => {
+describe('splitAssetWrappedScriptPubKey — historical testnet codec fixtures', () => {
   it('splits a PQ (witness v1) asset-wrapped UTXO into prefix + TREST transfer', () => {
     const result = splitAssetWrappedScriptPubKey(REAL_PQ_TREST_SPK);
     expect(result.prefixHex).toBe(REAL_PQ_PREFIX);

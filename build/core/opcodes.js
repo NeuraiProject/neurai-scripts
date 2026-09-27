@@ -186,20 +186,27 @@ export const CHAINCONTEXT_CHAIN_ID = 0x03;
 // Native Merkle inclusion verifier. Consumes (leaf, scheme_id, proof,
 // root) and pushes a boolean. Flag off → bad-opcode.
 export const OP_CHECKMERKLEINCLUSION = 0xc1;
+// NIP-041: (outputIndex -- witnessVersion || 32-byte program).
+export const OP_OUTPUTAUTHDEST = 0xc2;
+// NIP-018: verifies an AuthScript proof and returns a boolean.
+export const OP_ZKVERIFY = 0xc3;
+// NIP-043: spent-input field introspection, distinct from reference inputs.
+export const OP_INPUTFIELD = 0xc4;
 // ---------- Byte manipulation (DePIN-Test) ----------
 export const OP_CAT = 0x7e;
 export const OP_SPLIT = 0xb7;
 export const OP_REVERSEBYTES = 0xbc;
 // ---------- Selectors for OP_TXFIELD / OP_REFINPUTFIELD ----------
-// Both opcodes share the same selector table (OP_TXFIELD on the spent UTXO,
-// OP_REFINPUTFIELD on an output referenced via vrefin). Valid: 0x01..0x03.
+// OP_TXFIELD, OP_INPUTFIELD and OP_REFINPUTFIELD share selectors 0x01..0x03.
+// NIP-041 adds 0x04 for a strict 33-byte AuthScript destination.
 export const TXFIELD_VALUE = 0x01;
 export const TXFIELD_AUTHSCRIPT_COMMITMENT = 0x02;
 export const TXFIELD_SCRIPTPUBKEY = 0x03;
+export const TXFIELD_AUTHDEST = 0x04;
 // ---------- Bitmask selectors for OP_TXHASH ----------
-// The selector is a single byte where each bit selects which transaction
-// field to include in the double-SHA256. Selector 0x00 is invalid; any
-// non-zero combination is valid. 0xff = all eight fields.
+// NIP-042 requires a two-byte little-endian selector, even for low masks.
+// Bits 0..8 select fields for the tagged NeuraiTxHash digest. Valid masks
+// are 0x001..0x1ff; zero and all higher bits are rejected by consensus.
 export const TXHASH_VERSION = 0x01;
 export const TXHASH_LOCKTIME = 0x02;
 export const TXHASH_INPUT_PREVOUTS = 0x04;
@@ -208,12 +215,11 @@ export const TXHASH_OUTPUTS = 0x10;
 export const TXHASH_CURRENT_PREVOUT = 0x20;
 export const TXHASH_CURRENT_SEQUENCE = 0x40;
 export const TXHASH_CURRENT_INDEX = 0x80;
-export const TXHASH_ALL = 0xff;
+export const TXHASH_REFINPUTS = 0x100;
+export const TXHASH_ALL = 0x1ff;
 // ---------- Selectors for OP_OUTPUTASSETFIELD / OP_INPUTASSETFIELD / OP_REFINPUTASSETFIELD ----------
-// All three opcodes share the same selector table. Valid range: 0x01..0x07.
-// Selector 0x05 is the boolean "has IPFS" flag; 0x06 is the IPFS hash
-// payload; 0x07 is the asset operation type. (This matches the asset-op
-// encoding in `src/assets/assets.cpp` and the NIP spec §3.1.)
+// All three opcodes share this selector table. 0x08 is gated by NIP-043
+// and extracts the optional transfer message from a strict asset wrapper.
 export const ASSETFIELD_NAME = 0x01;
 export const ASSETFIELD_AMOUNT = 0x02;
 export const ASSETFIELD_UNITS = 0x03;
@@ -221,3 +227,10 @@ export const ASSETFIELD_REISSUABLE = 0x04;
 export const ASSETFIELD_HAS_IPFS = 0x05;
 export const ASSETFIELD_IPFS_HASH = 0x06;
 export const ASSETFIELD_TYPE = 0x07;
+export const ASSETFIELD_MESSAGE = 0x08;
+// NIP-031/043 Merkle inclusion scheme identifiers.
+export const MERKLE_SCHEME_BITCOIN_NEURAI = 0x01;
+export const MERKLE_SCHEME_SHA256_PLAIN = 0x02;
+export const MERKLE_SCHEME_KECCAK256_PLAIN = 0x03;
+export const MERKLE_SCHEME_BLAKE2B_PLAIN = 0x04;
+export const MERKLE_SCHEME_POSEIDON_BN254 = 0x05;

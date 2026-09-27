@@ -136,10 +136,10 @@ interface PartialFillOrderPQParams {
     /** Price in XNA satoshis per indivisible unit of the asset. */
     unitPriceSats: bigint;
     /**
-     * OP_TXHASH selector byte bound into the script. Default `0xff` (all
-     * eight fields). The seller must sign `SHA256(OP_TXHASH(selector))` with
-     * their PQ key at cancel time. See
-     * `doc/new-opcodes-depin-branch.md` §2.1 for the bit → field mapping.
+     * NIP-042 OP_TXHASH selector bound into the script as exactly two
+     * little-endian bytes. Default `0x1ff` commits all nine fields, including
+     * reference inputs. The seller signs `SHA256(OP_TXHASH(selector))` with
+     * their PQ key at cancel time.
      */
     txHashSelector?: number;
     /**
@@ -348,12 +348,16 @@ declare const CHAINCONTEXT_HEIGHT = 1;
 declare const CHAINCONTEXT_MTP = 2;
 declare const CHAINCONTEXT_CHAIN_ID = 3;
 declare const OP_CHECKMERKLEINCLUSION = 193;
+declare const OP_OUTPUTAUTHDEST = 194;
+declare const OP_ZKVERIFY = 195;
+declare const OP_INPUTFIELD = 196;
 declare const OP_CAT = 126;
 declare const OP_SPLIT = 183;
 declare const OP_REVERSEBYTES = 188;
 declare const TXFIELD_VALUE = 1;
 declare const TXFIELD_AUTHSCRIPT_COMMITMENT = 2;
 declare const TXFIELD_SCRIPTPUBKEY = 3;
+declare const TXFIELD_AUTHDEST = 4;
 declare const TXHASH_VERSION = 1;
 declare const TXHASH_LOCKTIME = 2;
 declare const TXHASH_INPUT_PREVOUTS = 4;
@@ -362,7 +366,8 @@ declare const TXHASH_OUTPUTS = 16;
 declare const TXHASH_CURRENT_PREVOUT = 32;
 declare const TXHASH_CURRENT_SEQUENCE = 64;
 declare const TXHASH_CURRENT_INDEX = 128;
-declare const TXHASH_ALL = 255;
+declare const TXHASH_REFINPUTS = 256;
+declare const TXHASH_ALL = 511;
 declare const ASSETFIELD_NAME = 1;
 declare const ASSETFIELD_AMOUNT = 2;
 declare const ASSETFIELD_UNITS = 3;
@@ -370,10 +375,17 @@ declare const ASSETFIELD_REISSUABLE = 4;
 declare const ASSETFIELD_HAS_IPFS = 5;
 declare const ASSETFIELD_IPFS_HASH = 6;
 declare const ASSETFIELD_TYPE = 7;
+declare const ASSETFIELD_MESSAGE = 8;
+declare const MERKLE_SCHEME_BITCOIN_NEURAI = 1;
+declare const MERKLE_SCHEME_SHA256_PLAIN = 2;
+declare const MERKLE_SCHEME_KECCAK256_PLAIN = 3;
+declare const MERKLE_SCHEME_BLAKE2B_PLAIN = 4;
+declare const MERKLE_SCHEME_POSEIDON_BN254 = 5;
 
 declare const opcodes_d_ASSETFIELD_AMOUNT: typeof ASSETFIELD_AMOUNT;
 declare const opcodes_d_ASSETFIELD_HAS_IPFS: typeof ASSETFIELD_HAS_IPFS;
 declare const opcodes_d_ASSETFIELD_IPFS_HASH: typeof ASSETFIELD_IPFS_HASH;
+declare const opcodes_d_ASSETFIELD_MESSAGE: typeof ASSETFIELD_MESSAGE;
 declare const opcodes_d_ASSETFIELD_NAME: typeof ASSETFIELD_NAME;
 declare const opcodes_d_ASSETFIELD_REISSUABLE: typeof ASSETFIELD_REISSUABLE;
 declare const opcodes_d_ASSETFIELD_TYPE: typeof ASSETFIELD_TYPE;
@@ -381,6 +393,11 @@ declare const opcodes_d_ASSETFIELD_UNITS: typeof ASSETFIELD_UNITS;
 declare const opcodes_d_CHAINCONTEXT_CHAIN_ID: typeof CHAINCONTEXT_CHAIN_ID;
 declare const opcodes_d_CHAINCONTEXT_HEIGHT: typeof CHAINCONTEXT_HEIGHT;
 declare const opcodes_d_CHAINCONTEXT_MTP: typeof CHAINCONTEXT_MTP;
+declare const opcodes_d_MERKLE_SCHEME_BITCOIN_NEURAI: typeof MERKLE_SCHEME_BITCOIN_NEURAI;
+declare const opcodes_d_MERKLE_SCHEME_BLAKE2B_PLAIN: typeof MERKLE_SCHEME_BLAKE2B_PLAIN;
+declare const opcodes_d_MERKLE_SCHEME_KECCAK256_PLAIN: typeof MERKLE_SCHEME_KECCAK256_PLAIN;
+declare const opcodes_d_MERKLE_SCHEME_POSEIDON_BN254: typeof MERKLE_SCHEME_POSEIDON_BN254;
+declare const opcodes_d_MERKLE_SCHEME_SHA256_PLAIN: typeof MERKLE_SCHEME_SHA256_PLAIN;
 declare const opcodes_d_OP_0: typeof OP_0;
 declare const opcodes_d_OP_0NOTEQUAL: typeof OP_0NOTEQUAL;
 declare const opcodes_d_OP_1: typeof OP_1;
@@ -446,6 +463,7 @@ declare const opcodes_d_OP_IF: typeof OP_IF;
 declare const opcodes_d_OP_IFDUP: typeof OP_IFDUP;
 declare const opcodes_d_OP_INPUTASSETFIELD: typeof OP_INPUTASSETFIELD;
 declare const opcodes_d_OP_INPUTCOUNT: typeof OP_INPUTCOUNT;
+declare const opcodes_d_OP_INPUTFIELD: typeof OP_INPUTFIELD;
 declare const opcodes_d_OP_INPUTVALUE: typeof OP_INPUTVALUE;
 declare const opcodes_d_OP_KECCAK256: typeof OP_KECCAK256;
 declare const opcodes_d_OP_LESSTHAN: typeof OP_LESSTHAN;
@@ -467,6 +485,7 @@ declare const opcodes_d_OP_NUMEQUALVERIFY: typeof OP_NUMEQUALVERIFY;
 declare const opcodes_d_OP_NUMNOTEQUAL: typeof OP_NUMNOTEQUAL;
 declare const opcodes_d_OP_OUTPUTASSETFIELD: typeof OP_OUTPUTASSETFIELD;
 declare const opcodes_d_OP_OUTPUTAUTHCOMMITMENT: typeof OP_OUTPUTAUTHCOMMITMENT;
+declare const opcodes_d_OP_OUTPUTAUTHDEST: typeof OP_OUTPUTAUTHDEST;
 declare const opcodes_d_OP_OUTPUTCOUNT: typeof OP_OUTPUTCOUNT;
 declare const opcodes_d_OP_OUTPUTSCRIPT: typeof OP_OUTPUTSCRIPT;
 declare const opcodes_d_OP_OUTPUTVALUE: typeof OP_OUTPUTVALUE;
@@ -502,6 +521,8 @@ declare const opcodes_d_OP_TXLOCKTIME: typeof OP_TXLOCKTIME;
 declare const opcodes_d_OP_VERIFY: typeof OP_VERIFY;
 declare const opcodes_d_OP_WITHIN: typeof OP_WITHIN;
 declare const opcodes_d_OP_XNA_ASSET: typeof OP_XNA_ASSET;
+declare const opcodes_d_OP_ZKVERIFY: typeof OP_ZKVERIFY;
+declare const opcodes_d_TXFIELD_AUTHDEST: typeof TXFIELD_AUTHDEST;
 declare const opcodes_d_TXFIELD_AUTHSCRIPT_COMMITMENT: typeof TXFIELD_AUTHSCRIPT_COMMITMENT;
 declare const opcodes_d_TXFIELD_SCRIPTPUBKEY: typeof TXFIELD_SCRIPTPUBKEY;
 declare const opcodes_d_TXFIELD_VALUE: typeof TXFIELD_VALUE;
@@ -513,12 +534,14 @@ declare const opcodes_d_TXHASH_INPUT_PREVOUTS: typeof TXHASH_INPUT_PREVOUTS;
 declare const opcodes_d_TXHASH_INPUT_SEQUENCES: typeof TXHASH_INPUT_SEQUENCES;
 declare const opcodes_d_TXHASH_LOCKTIME: typeof TXHASH_LOCKTIME;
 declare const opcodes_d_TXHASH_OUTPUTS: typeof TXHASH_OUTPUTS;
+declare const opcodes_d_TXHASH_REFINPUTS: typeof TXHASH_REFINPUTS;
 declare const opcodes_d_TXHASH_VERSION: typeof TXHASH_VERSION;
 declare namespace opcodes_d {
   export {
     opcodes_d_ASSETFIELD_AMOUNT as ASSETFIELD_AMOUNT,
     opcodes_d_ASSETFIELD_HAS_IPFS as ASSETFIELD_HAS_IPFS,
     opcodes_d_ASSETFIELD_IPFS_HASH as ASSETFIELD_IPFS_HASH,
+    opcodes_d_ASSETFIELD_MESSAGE as ASSETFIELD_MESSAGE,
     opcodes_d_ASSETFIELD_NAME as ASSETFIELD_NAME,
     opcodes_d_ASSETFIELD_REISSUABLE as ASSETFIELD_REISSUABLE,
     opcodes_d_ASSETFIELD_TYPE as ASSETFIELD_TYPE,
@@ -526,6 +549,11 @@ declare namespace opcodes_d {
     opcodes_d_CHAINCONTEXT_CHAIN_ID as CHAINCONTEXT_CHAIN_ID,
     opcodes_d_CHAINCONTEXT_HEIGHT as CHAINCONTEXT_HEIGHT,
     opcodes_d_CHAINCONTEXT_MTP as CHAINCONTEXT_MTP,
+    opcodes_d_MERKLE_SCHEME_BITCOIN_NEURAI as MERKLE_SCHEME_BITCOIN_NEURAI,
+    opcodes_d_MERKLE_SCHEME_BLAKE2B_PLAIN as MERKLE_SCHEME_BLAKE2B_PLAIN,
+    opcodes_d_MERKLE_SCHEME_KECCAK256_PLAIN as MERKLE_SCHEME_KECCAK256_PLAIN,
+    opcodes_d_MERKLE_SCHEME_POSEIDON_BN254 as MERKLE_SCHEME_POSEIDON_BN254,
+    opcodes_d_MERKLE_SCHEME_SHA256_PLAIN as MERKLE_SCHEME_SHA256_PLAIN,
     opcodes_d_OP_0 as OP_0,
     opcodes_d_OP_0NOTEQUAL as OP_0NOTEQUAL,
     opcodes_d_OP_1 as OP_1,
@@ -591,6 +619,7 @@ declare namespace opcodes_d {
     opcodes_d_OP_IFDUP as OP_IFDUP,
     opcodes_d_OP_INPUTASSETFIELD as OP_INPUTASSETFIELD,
     opcodes_d_OP_INPUTCOUNT as OP_INPUTCOUNT,
+    opcodes_d_OP_INPUTFIELD as OP_INPUTFIELD,
     opcodes_d_OP_INPUTVALUE as OP_INPUTVALUE,
     opcodes_d_OP_KECCAK256 as OP_KECCAK256,
     opcodes_d_OP_LESSTHAN as OP_LESSTHAN,
@@ -612,6 +641,7 @@ declare namespace opcodes_d {
     opcodes_d_OP_NUMNOTEQUAL as OP_NUMNOTEQUAL,
     opcodes_d_OP_OUTPUTASSETFIELD as OP_OUTPUTASSETFIELD,
     opcodes_d_OP_OUTPUTAUTHCOMMITMENT as OP_OUTPUTAUTHCOMMITMENT,
+    opcodes_d_OP_OUTPUTAUTHDEST as OP_OUTPUTAUTHDEST,
     opcodes_d_OP_OUTPUTCOUNT as OP_OUTPUTCOUNT,
     opcodes_d_OP_OUTPUTSCRIPT as OP_OUTPUTSCRIPT,
     opcodes_d_OP_OUTPUTVALUE as OP_OUTPUTVALUE,
@@ -647,6 +677,8 @@ declare namespace opcodes_d {
     opcodes_d_OP_VERIFY as OP_VERIFY,
     opcodes_d_OP_WITHIN as OP_WITHIN,
     opcodes_d_OP_XNA_ASSET as OP_XNA_ASSET,
+    opcodes_d_OP_ZKVERIFY as OP_ZKVERIFY,
+    opcodes_d_TXFIELD_AUTHDEST as TXFIELD_AUTHDEST,
     opcodes_d_TXFIELD_AUTHSCRIPT_COMMITMENT as TXFIELD_AUTHSCRIPT_COMMITMENT,
     opcodes_d_TXFIELD_SCRIPTPUBKEY as TXFIELD_SCRIPTPUBKEY,
     opcodes_d_TXFIELD_VALUE as TXFIELD_VALUE,
@@ -658,6 +690,7 @@ declare namespace opcodes_d {
     opcodes_d_TXHASH_INPUT_SEQUENCES as TXHASH_INPUT_SEQUENCES,
     opcodes_d_TXHASH_LOCKTIME as TXHASH_LOCKTIME,
     opcodes_d_TXHASH_OUTPUTS as TXHASH_OUTPUTS,
+    opcodes_d_TXHASH_REFINPUTS as TXHASH_REFINPUTS,
     opcodes_d_TXHASH_VERSION as TXHASH_VERSION,
   };
 }
@@ -1032,7 +1065,7 @@ declare function buildPartialFillScriptHex(params: PartialFillOrderParams): stri
  * `./script.ts` for the three-branch layout description.
  */
 
-declare const DEFAULT_PQ_TXHASH_SELECTOR = 255;
+declare const DEFAULT_PQ_TXHASH_SELECTOR = 511;
 /**
  * Build the scriptPubKey of a PQ Partial-Fill Sell Order covenant UTXO.
  */
