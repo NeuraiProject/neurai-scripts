@@ -2212,7 +2212,224 @@ var NeuraiScriptsBundle = (function (exports) {
     }
 
     /**
-     * Partial-Fill Sell Order covenant script (three-branch).
+     * Buyer fill branches shared by both Partial-Fill Sell Order variants
+     * (ECDSA cancel in `./script.ts`, ML-DSA-44 cancel in `./script-pq.ts`).
+     * The variants only differ in their cancel branch; everything after the
+     * outer `OP_ELSE` is emitted and parsed here.
+     *
+     * Input-0 binding. The fill branches read the order's asset amount with
+     * `<0> OP_INPUTASSETFIELD` and constrain outputs 0..2 by fixed index. Input
+     * indices are absolute and Script cannot ask for the index of the input
+     * being evaluated, so without a binding a buyer could:
+     *   - put a foreign asset UTXO at input 0 and the order at input 1: the
+     *     order then prices the fill by the foreign amount and the rest of the
+     *     order leaves through an unconstrained output;
+     *   - spend several identical orders together, every one of them satisfied
+     *     by the same payment output.
+     * The fill block therefore opens with
+     *
+     *   <0x80 0x00> OP_TXHASH <INPUT_ZERO_TXHASH> OP_EQUALVERIFY
+     *
+     * NIP-042 mask 0x0080 commits only to the index of the input being
+     * evaluated, so the digest equals the constant exactly when this covenant
+     * is spent as input 0. At most one order per transaction can take a fill
+     * branch; the seller's cancel branch is not bound.
+     *
+     * Layout (after the variant's `OP_IF <cancel> OP_ELSE`):
+     *
+     *   <0x80 0x00> OP_TXHASH <INPUT_ZERO_TXHASH> OP_EQUALVERIFY
+     *   OP_IF                                                  ← full fill, unlock <1> <0>
+     *     [expiration gate]
+     *     <0> <2> OP_INPUTASSETFIELD                           (N = order amount)
+     *     DUP <price> MUL <0> OUTPUTVALUE SWAP GE VERIFY       (payment value)
+     *     <0> OUTPUTSCRIPT <paymentSpk> EQUALVERIFY            (payment destination)
+     *     DUP <1> <2> OUTPUTASSETFIELD EQUALVERIFY             (buyer amount == N)
+     *     <1> <1> OUTPUTASSETFIELD <tokenId> EQUALVERIFY       (buyer asset name)
+     *     DROP <1>
+     *   OP_ELSE                                                ← partial fill, unlock <N> <0> <0>
+     *     [expiration gate]
+     *     payment value, payment destination, buyer amount, buyer name (as above)
+     *     <2> OUTPUTAUTHCOMMITMENT <2> TXFIELD EQUALVERIFY     (continuation, NIP-023)
+     *     <2> <1> OUTPUTASSETFIELD <tokenId> EQUALVERIFY       (continuation name)
+     *     <2> <2> OUTPUTASSETFIELD OVER <0> <2> INPUTASSETFIELD SWAP SUB EQUALVERIFY
+     *     DROP <1>
+     *   OP_ENDIF
+     */
+    /** NIP-042 mask (two bytes, little-endian) selecting only the current input index. */
+    const INPUT_INDEX_TXHASH_SELECTOR = Uint8Array.of(TXHASH_CURRENT_INDEX, 0x00);
+    /**
+     * `OP_TXHASH(0x0080)` evaluated at input 0:
+     * `SHA256(tag || tag || 80 00 || 00 00 00 00)` with `tag = SHA256("NeuraiTxHash")`.
+     */
+    const INPUT_ZERO_TXHASH = hexToBytes('419632cabaf8bb70b96a8c92c4601a9c2ba11e96841daebc9d98f4835eeb0e36');
+    function appendPaymentAndBuyerChecks(b, p) {
+        // output[0].value >= N * unitPriceSats                      [ N ]
+        b.op(OP_DUP)
+            .pushInt(p.unitPriceSats)
+            .op(OP_MUL)
+            .pushInt(0)
+            .op(OP_OUTPUTVALUE)
+            .op(OP_SWAP)
+            .op(OP_GREATERTHANOREQUAL)
+            .op(OP_VERIFY);
+        // output[0].scriptPubKey == paymentScriptPubKey             [ N ]
+        b.pushInt(0)
+            .op(OP_OUTPUTSCRIPT)
+            .pushBytes(p.paymentScriptPubKey)
+            .op(OP_EQUALVERIFY);
+        // output[1].asset.amount == N                               [ N ]
+        b.op(OP_DUP)
+            .pushInt(1)
+            .pushInt(ASSETFIELD_AMOUNT)
+            .op(OP_OUTPUTASSETFIELD)
+            .op(OP_EQUALVERIFY);
+        // output[1].asset.name == tokenId                           [ N ]
+        b.pushInt(1)
+            .pushInt(ASSETFIELD_NAME)
+            .op(OP_OUTPUTASSETFIELD)
+            .pushBytes(p.tokenIdBytes)
+            .op(OP_EQUALVERIFY);
+    }
+    /** Emit the input-0 binding and both fill branches, ending with the inner `OP_ENDIF`. */
+    function appendFillBranches(b, p) {
+        b.pushBytes(INPUT_INDEX_TXHASH_SELECTOR)
+            .op(OP_TXHASH)
+            .pushBytes(INPUT_ZERO_TXHASH)
+            .op(OP_EQUALVERIFY);
+        // ──────── Full fill: N is the whole order, no continuation ────────
+        b.op(OP_IF);
+        appendExpirationGate(b, p.expiration);
+        b.pushInt(0)
+            .pushInt(ASSETFIELD_AMOUNT)
+            .op(OP_INPUTASSETFIELD); // [ N ]
+        appendPaymentAndBuyerChecks(b, p);
+        b.op(OP_DROP).pushInt(1);
+        // ──────── Partial fill: buyer pushes N, remainder continues at output 2 ────────
+        b.op(OP_ELSE);
+        appendExpirationGate(b, p.expiration);
+        appendPaymentAndBuyerChecks(b, p);
+        // Continuation keeps the spent order's AuthScript commitment (NIP-023).
+        b.pushInt(2)
+            .op(OP_OUTPUTAUTHCOMMITMENT)
+            .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
+            .op(OP_TXFIELD)
+            .op(OP_EQUALVERIFY);
+        b.pushInt(2)
+            .pushInt(ASSETFIELD_NAME)
+            .op(OP_OUTPUTASSETFIELD)
+            .pushBytes(p.tokenIdBytes)
+            .op(OP_EQUALVERIFY);
+        // output[2].asset.amount == orderAmount - N
+        b.pushInt(2)
+            .pushInt(ASSETFIELD_AMOUNT)
+            .op(OP_OUTPUTASSETFIELD) // [ N, rem ]
+            .op(OP_OVER) // [ N, rem, N ]
+            .pushInt(0)
+            .pushInt(ASSETFIELD_AMOUNT)
+            .op(OP_INPUTASSETFIELD) // [ N, rem, N, in ]
+            .op(OP_SWAP) // [ N, rem, in, N ]
+            .op(OP_SUB) // [ N, rem, in - N ]
+            .op(OP_EQUALVERIFY);
+        b.op(OP_DROP).pushInt(1);
+        b.op(OP_ENDIF);
+    }
+    function readPaymentAndBuyerChecks(c, label) {
+        expectByte(c, OP_DUP, `OP_DUP (price, ${label})`);
+        const unitPriceSats = readPushPositiveInt(c, `unitPriceSats (${label})`);
+        expectByte(c, OP_MUL, `OP_MUL (${label})`);
+        expectByte(c, OP_0, `OP_0 (payment idx, ${label})`);
+        expectByte(c, OP_OUTPUTVALUE, `OP_OUTPUTVALUE (${label})`);
+        expectByte(c, OP_SWAP, `OP_SWAP (${label})`);
+        expectByte(c, OP_GREATERTHANOREQUAL, `OP_GREATERTHANOREQUAL (${label})`);
+        expectByte(c, OP_VERIFY, `OP_VERIFY (payment, ${label})`);
+        expectByte(c, OP_0, `OP_0 (spk idx, ${label})`);
+        expectByte(c, OP_OUTPUTSCRIPT, `OP_OUTPUTSCRIPT (${label})`);
+        const paymentScriptPubKey = readPush(c, `paymentScriptPubKey (${label})`);
+        expectByte(c, OP_EQUALVERIFY, `OP_EQUALVERIFY (payment spk, ${label})`);
+        expectByte(c, OP_DUP, `OP_DUP (buyer amount, ${label})`);
+        expectByte(c, OP_1, `OP_1 (buyer idx, ${label})`);
+        expectByte(c, OP_2, `OP_2 (AMOUNT sel, ${label})`);
+        expectByte(c, OP_OUTPUTASSETFIELD, `OP_OUTPUTASSETFIELD (buyer amount, ${label})`);
+        expectByte(c, OP_EQUALVERIFY, `OP_EQUALVERIFY (buyer amount, ${label})`);
+        expectByte(c, OP_1, `OP_1 (buyer idx, ${label})`);
+        expectByte(c, OP_1, `OP_1 (NAME sel, ${label})`);
+        expectByte(c, OP_OUTPUTASSETFIELD, `OP_OUTPUTASSETFIELD (buyer name, ${label})`);
+        const tokenId = readPush(c, `tokenId (${label})`);
+        expectByte(c, OP_EQUALVERIFY, `OP_EQUALVERIFY (buyer name, ${label})`);
+        return { unitPriceSats, paymentScriptPubKey, tokenId };
+    }
+    /**
+     * Parse what `appendFillBranches` emits. Both branches must agree on price,
+     * payment destination, tokenId and expiration; any deviation throws.
+     */
+    function readFillBranches(c) {
+        const selector = readPush(c, 'input-0 binding selector');
+        if (!bytesEqual(selector, INPUT_INDEX_TXHASH_SELECTOR)) {
+            throw new Error('parse: fill branches must open with the input-0 binding <0x8000> OP_TXHASH (covenants without it ' +
+                'can be drained through a foreign input 0 and are not supported)');
+        }
+        expectByte(c, OP_TXHASH, 'OP_TXHASH (input-0 binding)');
+        const digest = readPush(c, 'input-0 binding digest');
+        if (!bytesEqual(digest, INPUT_ZERO_TXHASH)) {
+            throw new Error('parse: input-0 binding digest is not OP_TXHASH(0x0080) at input 0');
+        }
+        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (input-0 binding)');
+        // ═════ Full fill ═════
+        expectByte(c, OP_IF, 'OP_IF (full fill)');
+        const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
+        expectByte(c, OP_0, 'OP_0 (input idx, full)');
+        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
+        expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD (full)');
+        const full = readPaymentAndBuyerChecks(c, 'full');
+        expectByte(c, OP_DROP, 'OP_DROP (full)');
+        expectByte(c, OP_1, 'OP_1 (true, full)');
+        // ═════ Partial fill ═════
+        expectByte(c, OP_ELSE, 'OP_ELSE (partial fill)');
+        const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
+        const partial = readPaymentAndBuyerChecks(c, 'partial');
+        expectByte(c, OP_2, 'OP_2 (remainder idx)');
+        expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
+        expectByte(c, OP_2, 'OP_2 (TXFIELD sel: AUTHSCRIPT_COMMITMENT)');
+        expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
+        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
+        expectByte(c, OP_2, 'OP_2 (remainder idx)');
+        expectByte(c, OP_1, 'OP_1 (NAME sel)');
+        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder name)');
+        const remainderTokenId = readPush(c, 'tokenId (remainder)');
+        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder name)');
+        expectByte(c, OP_2, 'OP_2 (remainder idx)');
+        expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
+        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder amount)');
+        expectByte(c, OP_OVER, 'OP_OVER');
+        expectByte(c, OP_0, 'OP_0 (input idx)');
+        expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
+        expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD');
+        expectByte(c, OP_SWAP, 'OP_SWAP');
+        expectByte(c, OP_SUB, 'OP_SUB');
+        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder amount)');
+        expectByte(c, OP_DROP, 'OP_DROP (partial)');
+        expectByte(c, OP_1, 'OP_1 (true, partial)');
+        expectByte(c, OP_ENDIF, 'OP_ENDIF (fill branches)');
+        if (!bytesEqual(full.tokenId, partial.tokenId) || !bytesEqual(partial.tokenId, remainderTokenId)) {
+            throw new Error('parse: tokenId differs between the fill checks');
+        }
+        if (full.unitPriceSats !== partial.unitPriceSats) {
+            throw new Error('parse: unitPriceSats differs between full-fill and partial-fill branches');
+        }
+        if (!bytesEqual(full.paymentScriptPubKey, partial.paymentScriptPubKey)) {
+            throw new Error('parse: payment scriptPubKey differs between full-fill and partial-fill branches');
+        }
+        assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
+        return {
+            paymentScriptPubKey: full.paymentScriptPubKey,
+            tokenId: new TextDecoder('utf-8', { fatal: true }).decode(full.tokenId),
+            unitPriceSats: full.unitPriceSats,
+            expiration: expirationFull
+        };
+    }
+
+    /**
+     * Partial-Fill Sell Order covenant script (three-branch), ECDSA cancel.
      *
      * The covenant has three branches selected by the top of the unlock stack:
      *
@@ -2232,11 +2449,8 @@ var NeuraiScriptsBundle = (function (exports) {
      *                                        amount == inputAmount - N)
      *   output[3+] = optional buyer change  (not constrained by the covenant)
      *
-     * Continuity — the remainder UTXO reuses the spent covenant's AuthScript v1
-     * commitment via `OP_OUTPUTAUTHCOMMITMENT(2) == OP_TXFIELD(0x02)` (NIP-023).
-     * Comparing commitments rather than full scriptPubKeys is mandatory because
-     * the remainder's asset wrapper carries a different `amountRaw` than the
-     * spent UTXO's wrapper.
+     * The order must be input 0 for either fill branch to succeed: see the
+     * input-0 binding in `./fill-branches.ts`.
      *
      * Unlock stack shapes (scriptSig pushes, top → bottom):
      *
@@ -2244,10 +2458,12 @@ var NeuraiScriptsBundle = (function (exports) {
      *   Full fill:            <1>       <0>       (full-flag=1, cancel-flag=0)
      *   Partial fill:  <N>    <0>       <0>       (N, full-flag=0, cancel-flag=0)
      *
-     * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`) and
-     * commits to a 20-byte PKH — this variant only accepts legacy P2PKH
-     * addresses as the seller destination. For AuthScript bech32m destinations
-     * and post-quantum signing, use `buildPartialFillScriptPQ`.
+     * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`)
+     * against a 20-byte key hash. The payment destination is independent of
+     * that key: a legacy P2PKH seller passes `sellerAddress` (both at once),
+     * any other seller with a secp256k1 key — typically a strict ECDSA v3
+     * `nq1r…` wallet — passes `paymentAddress` and `sellerPubKeyHash`. For
+     * post-quantum cancellation use `buildPartialFillScriptPQ`.
      */
     const ASSET_NAME_MAX$1 = 32;
     function decodeSellerAddress(sellerAddress) {
@@ -2256,14 +2472,35 @@ var NeuraiScriptsBundle = (function (exports) {
         }
         const decoded = decodeAddress(sellerAddress);
         if (decoded.type !== 'p2pkh') {
-            throw new Error(`sellerAddress must be a legacy P2PKH address (the legacy partial-fill covenant uses OP_HASH160 + OP_CHECKSIG); ` +
-                `got ${decoded.type}. Use buildPartialFillScriptPQ for AuthScript destinations.`);
+            throw new Error(`sellerAddress must be a legacy P2PKH address; got ${decoded.type}. A seller with another address ` +
+                `type passes paymentAddress and sellerPubKeyHash, or uses buildPartialFillScriptPQ for a PQ key.`);
         }
         const pkh = Uint8Array.from(decoded.hash);
         if (pkh.length !== 20) {
             throw new Error(`decoded sellerAddress produced a ${pkh.length}-byte hash, expected 20`);
         }
         return pkh;
+    }
+    /** Cancel key hash and payment scriptPubKey from either form of seller params. */
+    function resolveSeller(params) {
+        const { sellerAddress, paymentAddress, sellerPubKeyHash } = params;
+        if (sellerAddress !== undefined) {
+            if (paymentAddress !== undefined || sellerPubKeyHash !== undefined) {
+                throw new Error('pass either sellerAddress, or paymentAddress with sellerPubKeyHash, not both');
+            }
+            const pkh = decodeSellerAddress(sellerAddress);
+            return { sellerPubKeyHash: pkh, paymentScriptPubKey: encodeP2PKHScriptPubKey(pkh) };
+        }
+        if (paymentAddress === undefined || sellerPubKeyHash === undefined) {
+            throw new Error('sellerAddress, or paymentAddress with sellerPubKeyHash, is required');
+        }
+        if (!(sellerPubKeyHash instanceof Uint8Array) || sellerPubKeyHash.length !== 20) {
+            throw new Error('sellerPubKeyHash must be a 20-byte Uint8Array (HASH160 of the compressed public key)');
+        }
+        return {
+            sellerPubKeyHash: Uint8Array.from(sellerPubKeyHash),
+            paymentScriptPubKey: encodeSellerScriptPubKey(paymentAddress).bytes
+        };
     }
     function assertTokenId$1(tokenId) {
         if (typeof tokenId !== 'string' || tokenId.length === 0) {
@@ -2292,13 +2529,11 @@ var NeuraiScriptsBundle = (function (exports) {
      * Returns raw bytes; wrap with `bytesToHex` for wire format.
      */
     function buildPartialFillScript(params) {
-        const { sellerAddress, tokenId, unitPriceSats } = params;
-        const sellerPubKeyHash = decodeSellerAddress(sellerAddress);
+        const { tokenId, unitPriceSats } = params;
+        const { sellerPubKeyHash, paymentScriptPubKey } = resolveSeller(params);
         assertTokenId$1(tokenId);
         assertPrice$1(unitPriceSats);
         const expiration = assertExpiration(params.expiration);
-        const sellerScriptPubKey = encodeP2PKHScriptPubKey(sellerPubKeyHash);
-        const tokenIdBytes = new TextEncoder().encode(tokenId);
         const b = new ScriptBuilder();
         // ════════ Cancel branch (outer IF) ════════
         // scriptSig: <sig> <pubkey> <1>
@@ -2307,107 +2542,13 @@ var NeuraiScriptsBundle = (function (exports) {
             .pushBytes(sellerPubKeyHash)
             .op(OP_EQUALVERIFY, OP_CHECKSIG)
             .op(OP_ELSE);
-        // ════════ Fill branches (outer ELSE: inner IF/ELSE) ════════
-        b.op(OP_IF);
-        // ──────── Full-fill branch (inner IF) ────────
-        // scriptSig: <1> <0>    ( full-flag=1, cancel-flag=0 )
-        // Stack entering: [ ]
-        //
-        // N is derived from the spent UTXO's asset amount, so the buyer does not
-        // push N. The entire covenant is drained to vout[1]; no vout[2] is
-        // constrained and none is required (consensus forbids zero-amount asset
-        // transfers, so the partial-fill continuity check is simply skipped).
-        appendExpirationGate(b, expiration);
-        // 1. N = inputAmount
-        b.pushInt(0)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_INPUTASSETFIELD); // [ N ]
-        // 2. output[0].value >= N * unitPriceSats
-        b.op(OP_DUP) // [ N, N ]
-            .pushInt(unitPriceSats) // [ N, N, price ]
-            .op(OP_MUL) // [ N, N*price ]
-            .pushInt(0) // [ N, N*price, 0 ]
-            .op(OP_OUTPUTVALUE) // [ N, N*price, value ]
-            .op(OP_SWAP) // [ N, value, N*price ]
-            .op(OP_GREATERTHANOREQUAL)
-            .op(OP_VERIFY); // [ N ]
-        // 3. output[0].scriptPubKey == sellerScriptPubKey
-        b.pushInt(0)
-            .op(OP_OUTPUTSCRIPT) // [ N, spk_out0 ]
-            .pushBytes(sellerScriptPubKey)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 4. output[1].asset.amount == N
-        b.op(OP_DUP) // [ N, N ]
-            .pushInt(1)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_OUTPUTASSETFIELD) // [ N, N, amount_out1 ]
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 5. output[1].asset.name == tokenId
-        b.pushInt(1)
-            .pushInt(ASSETFIELD_NAME)
-            .op(OP_OUTPUTASSETFIELD) // [ N, name_out1 ]
-            .pushBytes(tokenIdBytes)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 6. Drop N, leave TRUE on the stack.
-        b.op(OP_DROP).pushInt(1);
-        // ──────── Partial-fill branch (inner ELSE) ────────
-        // scriptSig: <N> <0> <0>   ( N, full-flag=0, cancel-flag=0 )
-        // Stack entering: [ N ]
-        b.op(OP_ELSE);
-        appendExpirationGate(b, expiration);
-        // 1. Payment value (output 0) >= N * unitPriceSats
-        b.op(OP_DUP) // [ N, N ]
-            .pushInt(unitPriceSats) // [ N, N, price ]
-            .op(OP_MUL) // [ N, N*price ]
-            .pushInt(0) // [ N, N*price, 0 ]
-            .op(OP_OUTPUTVALUE) // [ N, N*price, value ]
-            .op(OP_SWAP) // [ N, value, N*price ]
-            .op(OP_GREATERTHANOREQUAL)
-            .op(OP_VERIFY); // [ N ]
-        // 2. Payment scriptPubKey (output 0)
-        b.pushInt(0)
-            .op(OP_OUTPUTSCRIPT) // [ N, spk_out0 ]
-            .pushBytes(sellerScriptPubKey)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 3. Asset to buyer (output 1) amount == N
-        b.op(OP_DUP) // [ N, N ]
-            .pushInt(1)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_OUTPUTASSETFIELD)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 4. Asset to buyer (output 1) name == tokenId
-        b.pushInt(1)
-            .pushInt(ASSETFIELD_NAME)
-            .op(OP_OUTPUTASSETFIELD)
-            .pushBytes(tokenIdBytes)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 5. Continuation (output 2): same AuthScript commitment as spent UTXO
-        //    (NIP-023 — see file-level comment).
-        b.pushInt(2)
-            .op(OP_OUTPUTAUTHCOMMITMENT)
-            .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
-            .op(OP_TXFIELD)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 6. Continuation name == tokenId
-        b.pushInt(2)
-            .pushInt(ASSETFIELD_NAME)
-            .op(OP_OUTPUTASSETFIELD)
-            .pushBytes(tokenIdBytes)
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 7. Continuation amount == inputAmount - N
-        b.pushInt(2)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_OUTPUTASSETFIELD) // [ N, rem_amount ]
-            .op(OP_OVER) // [ N, rem_amount, N ]
-            .pushInt(0) // [ N, rem_amount, N, 0 ]
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_INPUTASSETFIELD) // [ N, rem_amount, N, in_amount ]
-            .op(OP_SWAP) // [ N, rem_amount, in_amount, N ]
-            .op(OP_SUB) // [ N, rem_amount, in_amount - N ]
-            .op(OP_EQUALVERIFY); // [ N ]
-        // 8. Drop N, leave TRUE on the stack.
-        b.op(OP_DROP).pushInt(1);
-        b.op(OP_ENDIF); // closes full/partial inner IF
+        // ════════ Fill branches (outer ELSE) ════════
+        appendFillBranches(b, {
+            paymentScriptPubKey,
+            tokenIdBytes: new TextEncoder().encode(tokenId),
+            unitPriceSats,
+            expiration
+        });
         b.op(OP_ENDIF); // closes outer cancel/fill IF
         return b.build();
     }
@@ -2437,11 +2578,11 @@ var NeuraiScriptsBundle = (function (exports) {
      *
      * The message that gets signed is **SHA256(OP_TXHASH(selector))** — CSFS
      * single-SHA256s its message argument before verification, and OP_TXHASH
-     * produces its own 32-byte hash, so the seller computes:
-     *   `sign(pqSeckey, SHA256(doubleSHA256(selected_tx_fields)))`
+     * produces its own 32-byte NIP-042 tagged hash, so the seller computes:
+     *   `sign(pqSeckey, SHA256(TaggedHash("NeuraiTxHash", mask || selected_tx_fields)))`
      *
-     * Fill branches are identical in structure to the legacy variant — see
-     * `./script.ts` for the three-branch layout description.
+     * The fill branches, including the input-0 binding, are shared with the
+     * ECDSA variant — see `./fill-branches.ts`.
      */
     const ASSET_NAME_MAX = 32;
     const DEFAULT_PQ_TXHASH_SELECTOR = 0x1ff;
@@ -2509,99 +2650,13 @@ var NeuraiScriptsBundle = (function (exports) {
             .op(OP_SWAP) // [ sig, txHash, pubKey ]
             .op(OP_CHECKSIGFROMSTACK) // [ 1 | 0 ]
             .op(OP_ELSE);
-        // ════════ Fill branches (inner IF: full / ELSE: partial) ════════
-        b.op(OP_IF);
-        // ──────── Full-fill branch ────────
-        // scriptSig: <1> <0>
-        // Stack entering: [ ]
-        // 1. N = inputAmount
-        appendExpirationGate(b, expiration);
-        b.pushInt(0)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_INPUTASSETFIELD);
-        // 2. Payment value (output 0) >= N * unitPriceSats
-        b.op(OP_DUP)
-            .pushInt(unitPriceSats)
-            .op(OP_MUL)
-            .pushInt(0)
-            .op(OP_OUTPUTVALUE)
-            .op(OP_SWAP)
-            .op(OP_GREATERTHANOREQUAL)
-            .op(OP_VERIFY);
-        // 3. Payment scriptPubKey (output 0)
-        b.pushInt(0)
-            .op(OP_OUTPUTSCRIPT)
-            .pushBytes(payment.bytes)
-            .op(OP_EQUALVERIFY);
-        // 4. Asset to buyer (output 1) amount == N
-        b.op(OP_DUP)
-            .pushInt(1)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_OUTPUTASSETFIELD)
-            .op(OP_EQUALVERIFY);
-        // 5. Asset to buyer (output 1) name == tokenId
-        b.pushInt(1)
-            .pushInt(ASSETFIELD_NAME)
-            .op(OP_OUTPUTASSETFIELD)
-            .pushBytes(tokenIdBytes)
-            .op(OP_EQUALVERIFY);
-        b.op(OP_DROP).pushInt(1);
-        // ──────── Partial-fill branch ────────
-        // scriptSig: <N> <0> <0>
-        // Stack entering: [ N ]
-        b.op(OP_ELSE);
-        appendExpirationGate(b, expiration);
-        // 1. Payment value (output 0) >= N * unitPriceSats
-        b.op(OP_DUP)
-            .pushInt(unitPriceSats)
-            .op(OP_MUL)
-            .pushInt(0)
-            .op(OP_OUTPUTVALUE)
-            .op(OP_SWAP)
-            .op(OP_GREATERTHANOREQUAL)
-            .op(OP_VERIFY);
-        // 2. Payment scriptPubKey (output 0)
-        b.pushInt(0)
-            .op(OP_OUTPUTSCRIPT)
-            .pushBytes(payment.bytes)
-            .op(OP_EQUALVERIFY);
-        // 3. Asset to buyer (output 1) amount == N
-        b.op(OP_DUP)
-            .pushInt(1)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_OUTPUTASSETFIELD)
-            .op(OP_EQUALVERIFY);
-        // 4. Asset to buyer (output 1) name == tokenId
-        b.pushInt(1)
-            .pushInt(ASSETFIELD_NAME)
-            .op(OP_OUTPUTASSETFIELD)
-            .pushBytes(tokenIdBytes)
-            .op(OP_EQUALVERIFY);
-        // 5. Continuation (output 2): same AuthScript commitment as spent (NIP-023)
-        b.pushInt(2)
-            .op(OP_OUTPUTAUTHCOMMITMENT)
-            .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
-            .op(OP_TXFIELD)
-            .op(OP_EQUALVERIFY);
-        // 6. Continuation name == tokenId
-        b.pushInt(2)
-            .pushInt(ASSETFIELD_NAME)
-            .op(OP_OUTPUTASSETFIELD)
-            .pushBytes(tokenIdBytes)
-            .op(OP_EQUALVERIFY);
-        // 7. Continuation amount == inputAmount - N
-        b.pushInt(2)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_OUTPUTASSETFIELD)
-            .op(OP_OVER)
-            .pushInt(0)
-            .pushInt(ASSETFIELD_AMOUNT)
-            .op(OP_INPUTASSETFIELD)
-            .op(OP_SWAP)
-            .op(OP_SUB)
-            .op(OP_EQUALVERIFY);
-        b.op(OP_DROP).pushInt(1);
-        b.op(OP_ENDIF); // full / partial
+        // ════════ Fill branches (outer ELSE) ════════
+        appendFillBranches(b, {
+            paymentScriptPubKey: payment.bytes,
+            tokenIdBytes,
+            unitPriceSats,
+            expiration
+        });
         b.op(OP_ENDIF); // cancel / fill
         return b.build();
     }
@@ -2824,17 +2879,15 @@ var NeuraiScriptsBundle = (function (exports) {
     }
 
     /**
-     * Parser for the Partial-Fill Sell Order covenant (three-branch).
+     * Parser for the Partial-Fill Sell Order covenant (three-branch, ECDSA cancel).
      *
-     * Extracts `(sellerPubKeyHash, unitPriceSats, tokenId)` from a scriptPubKey
-     * that was produced by `buildPartialFillScript`. Walks the exact byte
-     * layout emitted by the builder and fails on any deviation — this is
-     * deliberate, so a downstream indexer can unambiguously classify a UTXO as
-     * "partial-fill order" or "unknown script" with no false positives.
-     *
-     * The full-fill and partial-fill branches share `(sellerScriptPubKey,
-     * unitPriceSats, tokenId)`. The parser reads both branches and verifies
-     * consistency; inconsistency throws.
+     * Extracts `(sellerPubKeyHash, paymentScriptPubKey, unitPriceSats, tokenId)`
+     * from a scriptPubKey that was produced by `buildPartialFillScript`. Walks
+     * the exact byte layout emitted by the builder and fails on any deviation —
+     * this is deliberate, so a downstream indexer can unambiguously classify a
+     * UTXO as "partial-fill order" or "unknown script" with no false positives.
+     * Covenants built before the input-0 binding (neurai-scripts < 0.10.0) are
+     * rejected: their fill branches can be drained through a foreign input 0.
      */
     /**
      * Parse a covenant scriptPubKey and extract its parameters. Throws with a
@@ -2854,129 +2907,17 @@ var NeuraiScriptsBundle = (function (exports) {
         expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (cancel)');
         expectByte(c, OP_CHECKSIG, 'OP_CHECKSIG (cancel)');
         expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
-        // ═════ Inner IF — Full-fill branch ═════
-        expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
-        const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
-        // N = inputAmount
-        expectByte(c, OP_0, 'OP_0 (input idx, full)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
-        expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD (full)');
-        // payment value check
-        expectByte(c, OP_DUP, 'OP_DUP (price, full)');
-        const unitPriceSatsFull = readPushPositiveInt(c, 'unitPriceSats (full)');
-        expectByte(c, OP_MUL, 'OP_MUL (full)');
-        expectByte(c, OP_0, 'OP_0 (payment idx, full)');
-        expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE (full)');
-        expectByte(c, OP_SWAP, 'OP_SWAP (full)');
-        expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GREATERTHANOREQUAL (full)');
-        expectByte(c, OP_VERIFY, 'OP_VERIFY (payment full)');
-        // payment spk
-        expectByte(c, OP_0, 'OP_0 (spk idx, full)');
-        expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment full)');
-        const sellerSpkFull = readPush(c, 'sellerScriptPubKey (full)');
-        const expectedSpk = new Uint8Array([
-            OP_DUP, OP_HASH160, 0x14, ...sellerPubKeyHash, OP_EQUALVERIFY, OP_CHECKSIG
-        ]);
-        if (!bytesEqual(sellerSpkFull, expectedSpk)) {
-            throw new Error('parse: full-fill seller scriptPubKey does not match the cancel PKH');
-        }
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment spk full)');
-        // buyer amount == N (full)
-        expectByte(c, OP_DUP, 'OP_DUP (buyer amount, full)');
-        expectByte(c, OP_1, 'OP_1 (buyer idx, full)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount, full)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount, full)');
-        // buyer name == tokenId (full)
-        expectByte(c, OP_1, 'OP_1 (buyer idx, full)');
-        expectByte(c, OP_1, 'OP_1 (NAME sel, full)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name, full)');
-        const tokenIdFull = readPush(c, 'tokenId (full)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name, full)');
-        // tail (full)
-        expectByte(c, OP_DROP, 'OP_DROP (full)');
-        expectByte(c, OP_1, 'OP_1 (true, full)');
-        expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
-        // ═════ Inner ELSE — Partial-fill branch ═════
-        const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
-        // Payment value
-        expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
-        const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
-        expectByte(c, OP_MUL, 'OP_MUL (partial)');
-        expectByte(c, OP_0, 'OP_0 (pay idx, partial)');
-        expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE (partial)');
-        expectByte(c, OP_SWAP, 'OP_SWAP (partial)');
-        expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GREATERTHANOREQUAL (partial)');
-        expectByte(c, OP_VERIFY, 'OP_VERIFY (payment partial)');
-        // Payment spk
-        expectByte(c, OP_0, 'OP_0 (spk idx, partial)');
-        expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment partial)');
-        const sellerSpkPartial = readPush(c, 'sellerScriptPubKey (partial)');
-        if (!bytesEqual(sellerSpkPartial, expectedSpk)) {
-            throw new Error('parse: partial-fill seller scriptPubKey does not match the cancel PKH');
-        }
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment spk partial)');
-        // Buyer amount
-        expectByte(c, OP_DUP, 'OP_DUP (buyer amount, partial)');
-        expectByte(c, OP_1, 'OP_1 (buyer idx, partial)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, partial)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount, partial)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount, partial)');
-        // Buyer name
-        expectByte(c, OP_1, 'OP_1 (buyer idx, partial)');
-        expectByte(c, OP_1, 'OP_1 (NAME sel, partial)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name, partial)');
-        const tokenIdPartial1 = readPush(c, 'tokenId partial #1');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name, partial)');
-        // Continuation commitment
-        expectByte(c, OP_2, 'OP_2 (remainder idx)');
-        expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
-        expectByte(c, OP_2, 'OP_2 (TXFIELD sel: AUTHSCRIPT_COMMITMENT)');
-        expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
-        // Continuation name
-        expectByte(c, OP_2, 'OP_2 (remainder idx)');
-        expectByte(c, OP_1, 'OP_1 (NAME sel)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder name)');
-        const tokenIdPartial2 = readPush(c, 'tokenId partial #2');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder name)');
-        // Continuation amount
-        expectByte(c, OP_2, 'OP_2 (remainder idx)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder amount)');
-        expectByte(c, OP_OVER, 'OP_OVER');
-        expectByte(c, OP_0, 'OP_0 (input idx)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
-        expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD');
-        expectByte(c, OP_SWAP, 'OP_SWAP');
-        expectByte(c, OP_SUB, 'OP_SUB');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder amount)');
-        // Tail (partial)
-        expectByte(c, OP_DROP, 'OP_DROP (partial)');
-        expectByte(c, OP_1, 'OP_1 (true, partial)');
-        // Close the nested structure
-        expectByte(c, OP_ENDIF, 'OP_ENDIF (inner)');
+        // ═════ Outer ELSE — input-0 binding + fill branches ═════
+        const fill = readFillBranches(c);
         expectByte(c, OP_ENDIF, 'OP_ENDIF (outer)');
         assertTrailing(c);
-        // Cross-branch consistency: all three (full token, partial name #1,
-        // partial name #2) must agree, and the two unit prices must match.
-        if (!bytesEqual(tokenIdFull, tokenIdPartial1)) {
-            throw new Error('parse: tokenId differs between full-fill and partial-fill branches');
-        }
-        if (!bytesEqual(tokenIdPartial1, tokenIdPartial2)) {
-            throw new Error('parse: tokenId bytes differ between buyer and remainder partial checks');
-        }
-        if (unitPriceSatsFull !== unitPriceSatsPartial) {
-            throw new Error('parse: unitPriceSats differs between full-fill and partial-fill branches');
-        }
-        assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
-        const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
         return {
             network,
             sellerPubKeyHash,
-            unitPriceSats: unitPriceSatsFull,
-            tokenId,
-            expiration: expirationFull,
+            paymentScriptPubKey: fill.paymentScriptPubKey,
+            unitPriceSats: fill.unitPriceSats,
+            tokenId: fill.tokenId,
+            expiration: fill.expiration,
             scriptHex: bytesToHex(bytes)
         };
     }
@@ -2987,9 +2928,8 @@ var NeuraiScriptsBundle = (function (exports) {
      * payment scriptPubKey bytes (which may be P2PKH or AuthScript) and the
      * configured TXHASH selector.
      *
-     * The full-fill and partial-fill branches share `(paymentScriptPubKey,
-     * unitPriceSats, tokenId)`. The parser reads both branches and verifies
-     * consistency; inconsistency throws.
+     * The fill branches (and their input-0 binding) are read by the shared
+     * `readFillBranches`; covenants built before the binding are rejected.
      */
     /** Quick discriminator without throwing — useful for indexers. */
     function isPartialFillScriptPQ(script) {
@@ -3028,110 +2968,18 @@ var NeuraiScriptsBundle = (function (exports) {
         expectByte(c, OP_SWAP, 'OP_SWAP');
         expectByte(c, OP_CHECKSIGFROMSTACK, 'OP_CHECKSIGFROMSTACK');
         expectByte(c, OP_ELSE, 'OP_ELSE (outer → fill)');
-        // ═════ Inner IF — Full-fill branch ═════
-        expectByte(c, OP_IF, 'OP_IF (inner full-fill)');
-        const expirationFull = readOptionalExpirationGate(c, OP_0, 'full');
-        expectByte(c, OP_0, 'OP_0 (input idx, full)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
-        expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD (full)');
-        expectByte(c, OP_DUP, 'OP_DUP (price, full)');
-        const unitPriceSatsFull = readPushPositiveInt(c, 'unitPriceSats (full)');
-        expectByte(c, OP_MUL, 'OP_MUL (full)');
-        expectByte(c, OP_0, 'OP_0 (payment idx, full)');
-        expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE (full)');
-        expectByte(c, OP_SWAP, 'OP_SWAP (full)');
-        expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GE (full)');
-        expectByte(c, OP_VERIFY, 'OP_VERIFY (full)');
-        expectByte(c, OP_0, 'OP_0 (payment spk idx, full)');
-        expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment full)');
-        const paymentScriptPubKeyFull = readPush(c, 'paymentScriptPubKey (full)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment full)');
-        expectByte(c, OP_DUP, 'OP_DUP (buyer amount, full)');
-        expectByte(c, OP_1, 'OP_1 (buyer idx, full)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, full)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount, full)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount, full)');
-        expectByte(c, OP_1, 'OP_1 (buyer idx, full)');
-        expectByte(c, OP_1, 'OP_1 (NAME sel, full)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name, full)');
-        const tokenIdFull = readPush(c, 'tokenId (full)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name, full)');
-        expectByte(c, OP_DROP, 'OP_DROP (full)');
-        expectByte(c, OP_1, 'OP_1 (true, full)');
-        expectByte(c, OP_ELSE, 'OP_ELSE (inner → partial fill)');
-        // ═════ Inner ELSE — Partial-fill branch ═════
-        const expirationPartial = readOptionalExpirationGate(c, OP_DUP, 'partial');
-        expectByte(c, OP_DUP, 'OP_DUP (price, partial)');
-        const unitPriceSatsPartial = readPushPositiveInt(c, 'unitPriceSats (partial)');
-        expectByte(c, OP_MUL, 'OP_MUL (partial)');
-        expectByte(c, OP_0, 'OP_0 (payment idx, partial)');
-        expectByte(c, OP_OUTPUTVALUE, 'OP_OUTPUTVALUE (partial)');
-        expectByte(c, OP_SWAP, 'OP_SWAP (partial)');
-        expectByte(c, OP_GREATERTHANOREQUAL, 'OP_GE (partial)');
-        expectByte(c, OP_VERIFY, 'OP_VERIFY (partial)');
-        expectByte(c, OP_0, 'OP_0 (payment spk idx, partial)');
-        expectByte(c, OP_OUTPUTSCRIPT, 'OP_OUTPUTSCRIPT (payment partial)');
-        const paymentScriptPubKeyPartial = readPush(c, 'paymentScriptPubKey (partial)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (payment partial)');
-        expectByte(c, OP_DUP, 'OP_DUP (buyer amount, partial)');
-        expectByte(c, OP_1, 'OP_1 (buyer idx, partial)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel, partial)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer amount, partial)');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer amount, partial)');
-        expectByte(c, OP_1, 'OP_1 (buyer idx, partial)');
-        expectByte(c, OP_1, 'OP_1 (NAME sel, partial)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (buyer name, partial)');
-        const tokenIdPartial1 = readPush(c, 'tokenId partial #1');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (buyer name, partial)');
-        // Continuation commitment
-        expectByte(c, OP_2, 'OP_2 (remainder idx)');
-        expectByte(c, OP_OUTPUTAUTHCOMMITMENT, 'OP_OUTPUTAUTHCOMMITMENT (remainder)');
-        expectByte(c, OP_2, 'OP_2 (TXFIELD sel: AUTHSCRIPT_COMMITMENT)');
-        expectByte(c, OP_TXFIELD, 'OP_TXFIELD');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder auth)');
-        expectByte(c, OP_2, 'OP_2 (remainder idx)');
-        expectByte(c, OP_1, 'OP_1 (NAME sel)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder name)');
-        const tokenIdPartial2 = readPush(c, 'tokenId partial #2');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder name)');
-        expectByte(c, OP_2, 'OP_2 (remainder idx)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
-        expectByte(c, OP_OUTPUTASSETFIELD, 'OP_OUTPUTASSETFIELD (remainder amount)');
-        expectByte(c, OP_OVER, 'OP_OVER');
-        expectByte(c, OP_0, 'OP_0 (input idx)');
-        expectByte(c, OP_2, 'OP_2 (AMOUNT sel)');
-        expectByte(c, OP_INPUTASSETFIELD, 'OP_INPUTASSETFIELD');
-        expectByte(c, OP_SWAP, 'OP_SWAP');
-        expectByte(c, OP_SUB, 'OP_SUB');
-        expectByte(c, OP_EQUALVERIFY, 'OP_EQUALVERIFY (remainder amount)');
-        expectByte(c, OP_DROP, 'OP_DROP (partial)');
-        expectByte(c, OP_1, 'OP_1 (true, partial)');
-        expectByte(c, OP_ENDIF, 'OP_ENDIF (inner)');
+        // ═════ Outer ELSE — input-0 binding + fill branches ═════
+        const fill = readFillBranches(c);
         expectByte(c, OP_ENDIF, 'OP_ENDIF (outer)');
         assertTrailing(c);
-        // Cross-branch consistency.
-        if (!bytesEqual(paymentScriptPubKeyFull, paymentScriptPubKeyPartial)) {
-            throw new Error('parse-pq: paymentScriptPubKey differs between full-fill and partial-fill branches');
-        }
-        if (!bytesEqual(tokenIdFull, tokenIdPartial1)) {
-            throw new Error('parse-pq: tokenId differs between full-fill and partial-fill branches');
-        }
-        if (!bytesEqual(tokenIdPartial1, tokenIdPartial2)) {
-            throw new Error('parse-pq: tokenId differs between buyer and remainder partial checks');
-        }
-        if (unitPriceSatsFull !== unitPriceSatsPartial) {
-            throw new Error('parse-pq: unitPriceSats differs between full-fill and partial-fill branches');
-        }
-        assertSameExpiration(expirationFull, expirationPartial, 'full-fill and partial-fill branches');
-        const tokenId = new TextDecoder('utf-8', { fatal: true }).decode(tokenIdFull);
         return {
             network,
             pubKeyCommitment,
-            tokenId,
-            unitPriceSats: unitPriceSatsFull,
+            tokenId: fill.tokenId,
+            unitPriceSats: fill.unitPriceSats,
             txHashSelector,
-            expiration: expirationFull,
-            paymentScriptPubKey: paymentScriptPubKeyFull,
+            expiration: fill.expiration,
+            paymentScriptPubKey: fill.paymentScriptPubKey,
             scriptHex: bytesToHex(bytes)
         };
     }

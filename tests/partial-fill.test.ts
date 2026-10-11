@@ -8,7 +8,14 @@ import {
 } from '../src/covenants/partial-fill/index.js';
 import { bytesToHex, hexToBytes } from '../src/core/bytes.js';
 import type { PartialFillOrderParams } from '../src/types.js';
-import { testnetAuthScriptAddress, testnetP2PKHAddress } from './helpers.js';
+import { createHash } from 'node:crypto';
+import { INPUT_ZERO_TXHASH } from '../src/covenants/partial-fill/fill-branches.js';
+import {
+  INPUT_ZERO_BINDING_HEX,
+  testnetAuthScriptAddress,
+  testnetP2PKHAddress,
+  testnetStrictECDSAAddress
+} from './helpers.js';
 
 const sellerPkh = new Uint8Array(20).fill(0xaa);
 const TEST_SELLER_ADDRESS = testnetP2PKHAddress(sellerPkh);
@@ -29,6 +36,7 @@ const baseParams: PartialFillOrderParams = {
  *   IF                              ← cancel branch
  *     DUP HASH160 <PKH> EQUALVERIFY CHECKSIG
  *   ELSE
+ *     <0x8000> TXHASH <32B> EQUALVERIFY                              (order is input 0)
  *     IF                            ← inner: full-fill branch
  *       <0> <2> INPUTASSETFIELD                                      (N = inputAmount)
  *       DUP <price> MUL <0> OUTPUTVALUE SWAP GE VERIFY               (payment value)
@@ -57,6 +65,7 @@ const EXPECTED_SCRIPT_HEX =
 
   // ── Outer ELSE → inner IF (full-fill) ──
   '67' +                                                               // OP_ELSE (outer)
+  INPUT_ZERO_BINDING_HEX +                                             // order is input 0
   '63' +                                                               // OP_IF (inner: full-fill)
   '0052cf' +                                                           // <0> <2> INPUTASSETFIELD
   '76' + '0400e1f505' + '95' +                                         // DUP <price> MUL
@@ -94,7 +103,7 @@ describe('buildPartialFillScript', () => {
     });
     // Selector 1 (HEIGHT) is emitted as OP_1 (0x51), consensus-minimal.
     const gate = '02e80351d7a069';
-    expect(hex).toContain('6763' + gate + '0052cf');
+    expect(hex).toContain('67' + INPUT_ZERO_BINDING_HEX + '63' + gate + '0052cf');
     expect(hex).toContain('67' + gate + '76' + '0400e1f505');
     expect(hex).not.toContain('0101d7');
   });
@@ -106,7 +115,7 @@ describe('buildPartialFillScript', () => {
     });
     // Selector 2 (MTP) is emitted as OP_2 (0x52), consensus-minimal.
     const gate = '0400f1536552d7a069';
-    expect(hex).toContain('6763' + gate + '0052cf');
+    expect(hex).toContain('67' + INPUT_ZERO_BINDING_HEX + '63' + gate + '0052cf');
     expect(hex).toContain('67' + gate + '76' + '0400e1f505');
     expect(hex).not.toContain('0102d7');
   });
@@ -226,7 +235,7 @@ describe('parsePartialFillScript', () => {
     expect(parsed.tokenId).toBe(tokenId);
   });
 
-  it('fails when the cancel PKH and the first fill-branch PKH diverge', () => {
+  it('fails when the payment scriptPubKey differs between the fill branches', () => {
     const bytes = buildPartialFillScript(baseParams);
     // Flip the last byte of the *second* PKH occurrence (first fill-branch
     // payment spk, inside the full-fill body).
@@ -236,7 +245,7 @@ describe('parsePartialFillScript', () => {
     const secondIdx = hex.indexOf(marker, firstIdx + marker.length);
     expect(secondIdx).toBeGreaterThan(0);
     const tampered = hex.slice(0, secondIdx) + 'ab' + hex.slice(secondIdx + 2);
-    expect(() => parsePartialFillScript(tampered)).toThrow(/does not match/);
+    expect(() => parsePartialFillScript(tampered)).toThrow(/payment scriptPubKey differs/);
   });
 
   it('rejects trailing bytes', () => {
@@ -247,6 +256,85 @@ describe('parsePartialFillScript', () => {
   it('rejects an unrelated script', () => {
     const p2pkh = '76a914' + 'bb'.repeat(20) + '88ac';
     expect(() => parsePartialFillScript(p2pkh)).toThrow();
+  });
+});
+
+describe('ECDSA cancel key with an independent payment destination', () => {
+  const sellerPubKeyHash = new Uint8Array(20).fill(0xdd);
+  const v3Address = testnetStrictECDSAAddress(new Uint8Array(32).fill(0xee));
+
+  it('hardcodes the cancel key hash and the strict ECDSA v3 payment script separately', () => {
+    const hex = buildPartialFillScriptHex({
+      paymentAddress: v3Address,
+      sellerPubKeyHash,
+      tokenId: 'CAT',
+      unitPriceSats: 100_000_000n
+    });
+    expect(hex.startsWith('6376a914' + 'dd'.repeat(20) + '88ac67')).toBe(true);
+    const v3Spk = '5320' + 'ee'.repeat(32);
+    // Payment destination in both fill branches.
+    expect(hex.split('22' + v3Spk + '88').length - 1).toBe(2);
+
+    const parsed = parsePartialFillScript(hex);
+    expect(bytesToHex(parsed.sellerPubKeyHash)).toBe('dd'.repeat(20));
+    expect(bytesToHex(parsed.paymentScriptPubKey)).toBe(v3Spk);
+  });
+
+  it('reports the P2PKH payment script for a sellerAddress order', () => {
+    const parsed = parsePartialFillScript(buildPartialFillScriptHex(baseParams));
+    expect(bytesToHex(parsed.paymentScriptPubKey)).toBe('76a914' + 'aa'.repeat(20) + '88ac');
+  });
+
+  it('rejects mixing sellerAddress with paymentAddress / sellerPubKeyHash', () => {
+    expect(() =>
+      buildPartialFillScript({ ...baseParams, sellerPubKeyHash })
+    ).toThrow(/not both/);
+    expect(() =>
+      buildPartialFillScript({ ...baseParams, paymentAddress: v3Address })
+    ).toThrow(/not both/);
+  });
+
+  it('requires both paymentAddress and sellerPubKeyHash without sellerAddress', () => {
+    const { sellerAddress: _omit, ...rest } = baseParams;
+    expect(() => buildPartialFillScript({ ...rest, paymentAddress: v3Address })).toThrow(/required/);
+    expect(() => buildPartialFillScript({ ...rest, sellerPubKeyHash })).toThrow(/required/);
+    expect(() => buildPartialFillScript(rest)).toThrow(/required/);
+  });
+
+  it('rejects a sellerPubKeyHash that is not 20 bytes', () => {
+    expect(() =>
+      buildPartialFillScript({
+        paymentAddress: v3Address,
+        sellerPubKeyHash: new Uint8Array(32),
+        tokenId: 'CAT',
+        unitPriceSats: 1n
+      })
+    ).toThrow(/20-byte/);
+  });
+});
+
+describe('input-0 binding of the fill branches', () => {
+  it('commits to OP_TXHASH(0x0080) evaluated at input 0', () => {
+    const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest();
+    const tag = sha256(new TextEncoder().encode('NeuraiTxHash'));
+    const expected = sha256(Buffer.concat([tag, tag, Buffer.from([0x80, 0x00, 0, 0, 0, 0])]));
+    expect(bytesToHex(INPUT_ZERO_TXHASH)).toBe(expected.toString('hex'));
+  });
+
+  it('opens the fill branches of every order', () => {
+    const hex = buildPartialFillScriptHex(baseParams);
+    expect(hex).toContain('88ac67' + INPUT_ZERO_BINDING_HEX + '63');
+  });
+
+  it('parser rejects an order without the binding (pre-0.10.0 layout)', () => {
+    const unbound = buildPartialFillScriptHex(baseParams).replace(INPUT_ZERO_BINDING_HEX, '');
+    expect(() => parsePartialFillScript(unbound)).toThrow(/input-0 binding/);
+  });
+
+  it('parser rejects a binding to another input index', () => {
+    const hex = buildPartialFillScriptHex(baseParams);
+    const tampered = hex.replace(INPUT_ZERO_BINDING_HEX, INPUT_ZERO_BINDING_HEX.replace('419632ca', '419632cb'));
+    expect(() => parsePartialFillScript(tampered)).toThrow(/input-0 binding digest/);
   });
 });
 

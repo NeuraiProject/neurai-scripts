@@ -12,7 +12,12 @@ import {
 } from '../src/index.js';
 import { bytesToHex } from '../src/core/bytes.js';
 import type { PartialFillOrderPQParams } from '../src/types.js';
-import { testnetAuthScriptAddress, testnetStrictECDSAAddress, testnetStrictPQAddress } from './helpers.js';
+import {
+  INPUT_ZERO_BINDING_HEX,
+  testnetAuthScriptAddress,
+  testnetStrictECDSAAddress,
+  testnetStrictPQAddress
+} from './helpers.js';
 
 // Valid Neurai testnet P2PKH (byte prefix 127 → "t..."). Reused across the
 // neurai-create-transaction test suite.
@@ -74,6 +79,11 @@ describe('buildPartialFillScriptPQ', () => {
     expect(hex).toContain('b57cb467');
   });
 
+  it('opens the fill branches with the input-0 binding', () => {
+    const hex = buildPartialFillScriptPQHex(baseParams);
+    expect(hex).toContain('b57cb467' + INPUT_ZERO_BINDING_HEX + '63');
+  });
+
   it('optionally gates buyer fills by OP_CHAINCONTEXT expiration', () => {
     const hex = buildPartialFillScriptPQHex({
       ...baseParams,
@@ -83,7 +93,7 @@ describe('buildPartialFillScriptPQ', () => {
     // Selector 1 (HEIGHT) is emitted as OP_1 (0x51), not raw `01 01`, so the
     // script is consensus-minimal.
     const gate = '02e80351d7a069';
-    expect(hex).toContain('6763' + gate + '0052cf');
+    expect(hex).toContain('67' + INPUT_ZERO_BINDING_HEX + '63' + gate + '0052cf');
     expect(hex).toContain('67' + gate + '76' + '0400e1f505');
     // Sanity: the non-minimal raw-push form must NOT appear.
     expect(hex).not.toContain('0101d7');

@@ -19,17 +19,18 @@
  *
  * The message that gets signed is **SHA256(OP_TXHASH(selector))** — CSFS
  * single-SHA256s its message argument before verification, and OP_TXHASH
- * produces its own 32-byte hash, so the seller computes:
- *   `sign(pqSeckey, SHA256(doubleSHA256(selected_tx_fields)))`
+ * produces its own 32-byte NIP-042 tagged hash, so the seller computes:
+ *   `sign(pqSeckey, SHA256(TaggedHash("NeuraiTxHash", mask || selected_tx_fields)))`
  *
- * Fill branches are identical in structure to the legacy variant — see
- * `./script.ts` for the three-branch layout description.
+ * The fill branches, including the input-0 binding, are shared with the
+ * ECDSA variant — see `./fill-branches.ts`.
  */
 import { bytesToHex } from '../../core/bytes.js';
 import { encodeSellerScriptPubKey } from '../../address.js';
-import { ASSETFIELD_AMOUNT, ASSETFIELD_NAME, OP_CHECKSIGFROMSTACK, OP_DROP, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_GREATERTHANOREQUAL, OP_IF, OP_INPUTASSETFIELD, OP_MUL, OP_OUTPUTASSETFIELD, OP_OUTPUTAUTHCOMMITMENT, OP_OUTPUTSCRIPT, OP_OUTPUTVALUE, OP_OVER, OP_SHA256, OP_SUB, OP_SWAP, OP_TXFIELD, OP_TXHASH, OP_VERIFY, TXFIELD_AUTHSCRIPT_COMMITMENT } from '../../core/opcodes.js';
+import { OP_CHECKSIGFROMSTACK, OP_DUP, OP_ELSE, OP_ENDIF, OP_EQUALVERIFY, OP_IF, OP_SHA256, OP_SWAP, OP_TXHASH } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
-import { appendExpirationGate, assertExpiration } from './expiration.js';
+import { assertExpiration } from './expiration.js';
+import { appendFillBranches } from './fill-branches.js';
 const ASSET_NAME_MAX = 32;
 export const DEFAULT_PQ_TXHASH_SELECTOR = 0x1ff;
 function assertCommitment(commitment) {
@@ -96,99 +97,13 @@ export function buildPartialFillScriptPQ(params) {
         .op(OP_SWAP) // [ sig, txHash, pubKey ]
         .op(OP_CHECKSIGFROMSTACK) // [ 1 | 0 ]
         .op(OP_ELSE);
-    // ════════ Fill branches (inner IF: full / ELSE: partial) ════════
-    b.op(OP_IF);
-    // ──────── Full-fill branch ────────
-    // scriptSig: <1> <0>
-    // Stack entering: [ ]
-    // 1. N = inputAmount
-    appendExpirationGate(b, expiration);
-    b.pushInt(0)
-        .pushInt(ASSETFIELD_AMOUNT)
-        .op(OP_INPUTASSETFIELD);
-    // 2. Payment value (output 0) >= N * unitPriceSats
-    b.op(OP_DUP)
-        .pushInt(unitPriceSats)
-        .op(OP_MUL)
-        .pushInt(0)
-        .op(OP_OUTPUTVALUE)
-        .op(OP_SWAP)
-        .op(OP_GREATERTHANOREQUAL)
-        .op(OP_VERIFY);
-    // 3. Payment scriptPubKey (output 0)
-    b.pushInt(0)
-        .op(OP_OUTPUTSCRIPT)
-        .pushBytes(payment.bytes)
-        .op(OP_EQUALVERIFY);
-    // 4. Asset to buyer (output 1) amount == N
-    b.op(OP_DUP)
-        .pushInt(1)
-        .pushInt(ASSETFIELD_AMOUNT)
-        .op(OP_OUTPUTASSETFIELD)
-        .op(OP_EQUALVERIFY);
-    // 5. Asset to buyer (output 1) name == tokenId
-    b.pushInt(1)
-        .pushInt(ASSETFIELD_NAME)
-        .op(OP_OUTPUTASSETFIELD)
-        .pushBytes(tokenIdBytes)
-        .op(OP_EQUALVERIFY);
-    b.op(OP_DROP).pushInt(1);
-    // ──────── Partial-fill branch ────────
-    // scriptSig: <N> <0> <0>
-    // Stack entering: [ N ]
-    b.op(OP_ELSE);
-    appendExpirationGate(b, expiration);
-    // 1. Payment value (output 0) >= N * unitPriceSats
-    b.op(OP_DUP)
-        .pushInt(unitPriceSats)
-        .op(OP_MUL)
-        .pushInt(0)
-        .op(OP_OUTPUTVALUE)
-        .op(OP_SWAP)
-        .op(OP_GREATERTHANOREQUAL)
-        .op(OP_VERIFY);
-    // 2. Payment scriptPubKey (output 0)
-    b.pushInt(0)
-        .op(OP_OUTPUTSCRIPT)
-        .pushBytes(payment.bytes)
-        .op(OP_EQUALVERIFY);
-    // 3. Asset to buyer (output 1) amount == N
-    b.op(OP_DUP)
-        .pushInt(1)
-        .pushInt(ASSETFIELD_AMOUNT)
-        .op(OP_OUTPUTASSETFIELD)
-        .op(OP_EQUALVERIFY);
-    // 4. Asset to buyer (output 1) name == tokenId
-    b.pushInt(1)
-        .pushInt(ASSETFIELD_NAME)
-        .op(OP_OUTPUTASSETFIELD)
-        .pushBytes(tokenIdBytes)
-        .op(OP_EQUALVERIFY);
-    // 5. Continuation (output 2): same AuthScript commitment as spent (NIP-023)
-    b.pushInt(2)
-        .op(OP_OUTPUTAUTHCOMMITMENT)
-        .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
-        .op(OP_TXFIELD)
-        .op(OP_EQUALVERIFY);
-    // 6. Continuation name == tokenId
-    b.pushInt(2)
-        .pushInt(ASSETFIELD_NAME)
-        .op(OP_OUTPUTASSETFIELD)
-        .pushBytes(tokenIdBytes)
-        .op(OP_EQUALVERIFY);
-    // 7. Continuation amount == inputAmount - N
-    b.pushInt(2)
-        .pushInt(ASSETFIELD_AMOUNT)
-        .op(OP_OUTPUTASSETFIELD)
-        .op(OP_OVER)
-        .pushInt(0)
-        .pushInt(ASSETFIELD_AMOUNT)
-        .op(OP_INPUTASSETFIELD)
-        .op(OP_SWAP)
-        .op(OP_SUB)
-        .op(OP_EQUALVERIFY);
-    b.op(OP_DROP).pushInt(1);
-    b.op(OP_ENDIF); // full / partial
+    // ════════ Fill branches (outer ELSE) ════════
+    appendFillBranches(b, {
+        paymentScriptPubKey: payment.bytes,
+        tokenIdBytes,
+        unitPriceSats,
+        expiration
+    });
     b.op(OP_ENDIF); // cancel / fill
     return b.build();
 }

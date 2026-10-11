@@ -1,5 +1,5 @@
 /**
- * Partial-Fill Sell Order covenant script (three-branch).
+ * Partial-Fill Sell Order covenant script (three-branch), ECDSA cancel.
  *
  * The covenant has three branches selected by the top of the unlock stack:
  *
@@ -19,11 +19,8 @@
  *                                        amount == inputAmount - N)
  *   output[3+] = optional buyer change  (not constrained by the covenant)
  *
- * Continuity — the remainder UTXO reuses the spent covenant's AuthScript v1
- * commitment via `OP_OUTPUTAUTHCOMMITMENT(2) == OP_TXFIELD(0x02)` (NIP-023).
- * Comparing commitments rather than full scriptPubKeys is mandatory because
- * the remainder's asset wrapper carries a different `amountRaw` than the
- * spent UTXO's wrapper.
+ * The order must be input 0 for either fill branch to succeed: see the
+ * input-0 binding in `./fill-branches.ts`.
  *
  * Unlock stack shapes (scriptSig pushes, top → bottom):
  *
@@ -31,43 +28,31 @@
  *   Full fill:            <1>       <0>       (full-flag=1, cancel-flag=0)
  *   Partial fill:  <N>    <0>       <0>       (N, full-flag=0, cancel-flag=0)
  *
- * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`) and
- * commits to a 20-byte PKH — this variant only accepts legacy P2PKH
- * addresses as the seller destination. For AuthScript bech32m destinations
- * and post-quantum signing, use `buildPartialFillScriptPQ`.
+ * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`)
+ * against a 20-byte key hash. The payment destination is independent of
+ * that key: a legacy P2PKH seller passes `sellerAddress` (both at once),
+ * any other seller with a secp256k1 key — typically a strict ECDSA v3
+ * `nq1r…` wallet — passes `paymentAddress` and `sellerPubKeyHash`. For
+ * post-quantum cancellation use `buildPartialFillScriptPQ`.
  */
 
 import { decodeAddress } from '@neuraiproject/neurai-create-transaction';
 import { bytesToHex } from '../../core/bytes.js';
+import { encodeSellerScriptPubKey } from '../../address.js';
 import { encodeP2PKHScriptPubKey } from '../../standard/p2pkh.js';
 import {
-  ASSETFIELD_AMOUNT,
-  ASSETFIELD_NAME,
   OP_CHECKSIG,
-  OP_DROP,
   OP_DUP,
   OP_ELSE,
   OP_ENDIF,
   OP_EQUALVERIFY,
-  OP_GREATERTHANOREQUAL,
   OP_HASH160,
-  OP_IF,
-  OP_INPUTASSETFIELD,
-  OP_MUL,
-  OP_OUTPUTASSETFIELD,
-  OP_OUTPUTAUTHCOMMITMENT,
-  OP_OUTPUTSCRIPT,
-  OP_OUTPUTVALUE,
-  OP_OVER,
-  OP_SUB,
-  OP_SWAP,
-  OP_TXFIELD,
-  OP_VERIFY,
-  TXFIELD_AUTHSCRIPT_COMMITMENT
+  OP_IF
 } from '../../core/opcodes.js';
 import { ScriptBuilder } from '../../core/script-builder.js';
 import type { PartialFillOrderParams } from '../../types.js';
-import { appendExpirationGate, assertExpiration } from './expiration.js';
+import { assertExpiration } from './expiration.js';
+import { appendFillBranches } from './fill-branches.js';
 
 export { encodeP2PKHScriptPubKey } from '../../standard/p2pkh.js';
 
@@ -80,8 +65,8 @@ function decodeSellerAddress(sellerAddress: string): Uint8Array {
   const decoded = decodeAddress(sellerAddress);
   if (decoded.type !== 'p2pkh') {
     throw new Error(
-      `sellerAddress must be a legacy P2PKH address (the legacy partial-fill covenant uses OP_HASH160 + OP_CHECKSIG); ` +
-        `got ${decoded.type}. Use buildPartialFillScriptPQ for AuthScript destinations.`
+      `sellerAddress must be a legacy P2PKH address; got ${decoded.type}. A seller with another address ` +
+        `type passes paymentAddress and sellerPubKeyHash, or uses buildPartialFillScriptPQ for a PQ key.`
     );
   }
   const pkh = Uint8Array.from(decoded.hash);
@@ -91,6 +76,31 @@ function decodeSellerAddress(sellerAddress: string): Uint8Array {
     );
   }
   return pkh;
+}
+
+/** Cancel key hash and payment scriptPubKey from either form of seller params. */
+function resolveSeller(params: PartialFillOrderParams): {
+  sellerPubKeyHash: Uint8Array;
+  paymentScriptPubKey: Uint8Array;
+} {
+  const { sellerAddress, paymentAddress, sellerPubKeyHash } = params;
+  if (sellerAddress !== undefined) {
+    if (paymentAddress !== undefined || sellerPubKeyHash !== undefined) {
+      throw new Error('pass either sellerAddress, or paymentAddress with sellerPubKeyHash, not both');
+    }
+    const pkh = decodeSellerAddress(sellerAddress);
+    return { sellerPubKeyHash: pkh, paymentScriptPubKey: encodeP2PKHScriptPubKey(pkh) };
+  }
+  if (paymentAddress === undefined || sellerPubKeyHash === undefined) {
+    throw new Error('sellerAddress, or paymentAddress with sellerPubKeyHash, is required');
+  }
+  if (!(sellerPubKeyHash instanceof Uint8Array) || sellerPubKeyHash.length !== 20) {
+    throw new Error('sellerPubKeyHash must be a 20-byte Uint8Array (HASH160 of the compressed public key)');
+  }
+  return {
+    sellerPubKeyHash: Uint8Array.from(sellerPubKeyHash),
+    paymentScriptPubKey: encodeSellerScriptPubKey(paymentAddress).bytes
+  };
 }
 
 function assertTokenId(tokenId: string): void {
@@ -122,14 +132,11 @@ function assertPrice(priceSats: bigint): void {
  * Returns raw bytes; wrap with `bytesToHex` for wire format.
  */
 export function buildPartialFillScript(params: PartialFillOrderParams): Uint8Array {
-  const { sellerAddress, tokenId, unitPriceSats } = params;
-  const sellerPubKeyHash = decodeSellerAddress(sellerAddress);
+  const { tokenId, unitPriceSats } = params;
+  const { sellerPubKeyHash, paymentScriptPubKey } = resolveSeller(params);
   assertTokenId(tokenId);
   assertPrice(unitPriceSats);
   const expiration = assertExpiration(params.expiration);
-
-  const sellerScriptPubKey = encodeP2PKHScriptPubKey(sellerPubKeyHash);
-  const tokenIdBytes = new TextEncoder().encode(tokenId);
 
   const b = new ScriptBuilder();
 
@@ -141,124 +148,14 @@ export function buildPartialFillScript(params: PartialFillOrderParams): Uint8Arr
     .op(OP_EQUALVERIFY, OP_CHECKSIG)
     .op(OP_ELSE);
 
-  // ════════ Fill branches (outer ELSE: inner IF/ELSE) ════════
-  b.op(OP_IF);
+  // ════════ Fill branches (outer ELSE) ════════
+  appendFillBranches(b, {
+    paymentScriptPubKey,
+    tokenIdBytes: new TextEncoder().encode(tokenId),
+    unitPriceSats,
+    expiration
+  });
 
-  // ──────── Full-fill branch (inner IF) ────────
-  // scriptSig: <1> <0>    ( full-flag=1, cancel-flag=0 )
-  // Stack entering: [ ]
-  //
-  // N is derived from the spent UTXO's asset amount, so the buyer does not
-  // push N. The entire covenant is drained to vout[1]; no vout[2] is
-  // constrained and none is required (consensus forbids zero-amount asset
-  // transfers, so the partial-fill continuity check is simply skipped).
-  appendExpirationGate(b, expiration);
-
-  // 1. N = inputAmount
-  b.pushInt(0)
-    .pushInt(ASSETFIELD_AMOUNT)
-    .op(OP_INPUTASSETFIELD);   // [ N ]
-
-  // 2. output[0].value >= N * unitPriceSats
-  b.op(OP_DUP)                 // [ N, N ]
-    .pushInt(unitPriceSats)    // [ N, N, price ]
-    .op(OP_MUL)                // [ N, N*price ]
-    .pushInt(0)                // [ N, N*price, 0 ]
-    .op(OP_OUTPUTVALUE)        // [ N, N*price, value ]
-    .op(OP_SWAP)               // [ N, value, N*price ]
-    .op(OP_GREATERTHANOREQUAL)
-    .op(OP_VERIFY);            // [ N ]
-
-  // 3. output[0].scriptPubKey == sellerScriptPubKey
-  b.pushInt(0)
-    .op(OP_OUTPUTSCRIPT)       // [ N, spk_out0 ]
-    .pushBytes(sellerScriptPubKey)
-    .op(OP_EQUALVERIFY);       // [ N ]
-
-  // 4. output[1].asset.amount == N
-  b.op(OP_DUP)                 // [ N, N ]
-    .pushInt(1)
-    .pushInt(ASSETFIELD_AMOUNT)
-    .op(OP_OUTPUTASSETFIELD)   // [ N, N, amount_out1 ]
-    .op(OP_EQUALVERIFY);       // [ N ]
-
-  // 5. output[1].asset.name == tokenId
-  b.pushInt(1)
-    .pushInt(ASSETFIELD_NAME)
-    .op(OP_OUTPUTASSETFIELD)   // [ N, name_out1 ]
-    .pushBytes(tokenIdBytes)
-    .op(OP_EQUALVERIFY);       // [ N ]
-
-  // 6. Drop N, leave TRUE on the stack.
-  b.op(OP_DROP).pushInt(1);
-
-  // ──────── Partial-fill branch (inner ELSE) ────────
-  // scriptSig: <N> <0> <0>   ( N, full-flag=0, cancel-flag=0 )
-  // Stack entering: [ N ]
-  b.op(OP_ELSE);
-  appendExpirationGate(b, expiration);
-
-  // 1. Payment value (output 0) >= N * unitPriceSats
-  b.op(OP_DUP)              // [ N, N ]
-    .pushInt(unitPriceSats) // [ N, N, price ]
-    .op(OP_MUL)             // [ N, N*price ]
-    .pushInt(0)             // [ N, N*price, 0 ]
-    .op(OP_OUTPUTVALUE)     // [ N, N*price, value ]
-    .op(OP_SWAP)            // [ N, value, N*price ]
-    .op(OP_GREATERTHANOREQUAL)
-    .op(OP_VERIFY);         // [ N ]
-
-  // 2. Payment scriptPubKey (output 0)
-  b.pushInt(0)
-    .op(OP_OUTPUTSCRIPT)    // [ N, spk_out0 ]
-    .pushBytes(sellerScriptPubKey)
-    .op(OP_EQUALVERIFY);    // [ N ]
-
-  // 3. Asset to buyer (output 1) amount == N
-  b.op(OP_DUP)              // [ N, N ]
-    .pushInt(1)
-    .pushInt(ASSETFIELD_AMOUNT)
-    .op(OP_OUTPUTASSETFIELD)
-    .op(OP_EQUALVERIFY);    // [ N ]
-
-  // 4. Asset to buyer (output 1) name == tokenId
-  b.pushInt(1)
-    .pushInt(ASSETFIELD_NAME)
-    .op(OP_OUTPUTASSETFIELD)
-    .pushBytes(tokenIdBytes)
-    .op(OP_EQUALVERIFY);    // [ N ]
-
-  // 5. Continuation (output 2): same AuthScript commitment as spent UTXO
-  //    (NIP-023 — see file-level comment).
-  b.pushInt(2)
-    .op(OP_OUTPUTAUTHCOMMITMENT)
-    .pushInt(TXFIELD_AUTHSCRIPT_COMMITMENT)
-    .op(OP_TXFIELD)
-    .op(OP_EQUALVERIFY);    // [ N ]
-
-  // 6. Continuation name == tokenId
-  b.pushInt(2)
-    .pushInt(ASSETFIELD_NAME)
-    .op(OP_OUTPUTASSETFIELD)
-    .pushBytes(tokenIdBytes)
-    .op(OP_EQUALVERIFY);    // [ N ]
-
-  // 7. Continuation amount == inputAmount - N
-  b.pushInt(2)
-    .pushInt(ASSETFIELD_AMOUNT)
-    .op(OP_OUTPUTASSETFIELD)    // [ N, rem_amount ]
-    .op(OP_OVER)                // [ N, rem_amount, N ]
-    .pushInt(0)                 // [ N, rem_amount, N, 0 ]
-    .pushInt(ASSETFIELD_AMOUNT)
-    .op(OP_INPUTASSETFIELD)     // [ N, rem_amount, N, in_amount ]
-    .op(OP_SWAP)                // [ N, rem_amount, in_amount, N ]
-    .op(OP_SUB)                 // [ N, rem_amount, in_amount - N ]
-    .op(OP_EQUALVERIFY);        // [ N ]
-
-  // 8. Drop N, leave TRUE on the stack.
-  b.op(OP_DROP).pushInt(1);
-
-  b.op(OP_ENDIF);             // closes full/partial inner IF
   b.op(OP_ENDIF);             // closes outer cancel/fill IF
 
   return b.build();

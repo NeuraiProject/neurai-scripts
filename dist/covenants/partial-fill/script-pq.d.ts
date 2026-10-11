@@ -19,11 +19,11 @@
  *
  * The message that gets signed is **SHA256(OP_TXHASH(selector))** — CSFS
  * single-SHA256s its message argument before verification, and OP_TXHASH
- * produces its own 32-byte hash, so the seller computes:
- *   `sign(pqSeckey, SHA256(doubleSHA256(selected_tx_fields)))`
+ * produces its own 32-byte NIP-042 tagged hash, so the seller computes:
+ *   `sign(pqSeckey, SHA256(TaggedHash("NeuraiTxHash", mask || selected_tx_fields)))`
  *
- * Fill branches are identical in structure to the legacy variant — see
- * `./script.ts` for the three-branch layout description.
+ * The fill branches, including the input-0 binding, are shared with the
+ * ECDSA variant — see `./fill-branches.ts`.
  */
 import type { PartialFillOrderPQParams } from '../../types.js';
 export declare const DEFAULT_PQ_TXHASH_SELECTOR = 511;

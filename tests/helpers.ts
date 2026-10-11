@@ -44,3 +44,10 @@ export function testnetStrictPQAddress(program32: Uint8Array): string {
 export function testnetStrictECDSAAddress(program32: Uint8Array): string {
   return bech32m.encode(ECDSA_TESTNET_HRP, [3, ...bech32m.toWords(Array.from(program32))]);
 }
+
+/**
+ * Input-0 binding that opens the partial-fill fill branches:
+ * `<0x80 0x00> OP_TXHASH <OP_TXHASH(0x0080) at input 0> OP_EQUALVERIFY`.
+ */
+export const INPUT_ZERO_BINDING_HEX =
+  '028000' + 'b5' + '20' + '419632cabaf8bb70b96a8c92c4601a9c2ba11e96841daebc9d98f4835eeb0e36' + '88';

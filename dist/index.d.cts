@@ -45,17 +45,35 @@ interface PartialFillExpiration {
      */
     value: bigint;
 }
+/**
+ * Seller of an ECDSA-cancel order, in one of two forms:
+ *   - `sellerAddress` alone: a legacy P2PKH address that is both the
+ *     payment destination and the cancel key hash;
+ *   - `paymentAddress` with `sellerPubKeyHash`: any payment destination
+ *     and the HASH160 of the secp256k1 key that may cancel. This is the
+ *     form for a strict ECDSA v3 (`nq1r…`) seller, whose address program is
+ *     a commitment and not a key hash.
+ * Passing both forms, or neither, throws.
+ */
 interface PartialFillOrderParams {
     /**
-     * Seller destination. Must be a legacy P2PKH address (base58check,
-     * "t..." on testnet, "N..." on mainnet). The legacy covenant uses
-     * `OP_HASH160 + OP_CHECKSIG` in its cancel branch, so every bech32m
-     * address (AuthScript v1 `nc1p…`, PQ v2 `pq1z…` and ECDSA v3 `nq1r…`,
-     * whose program is a commitment, not a key hash) is rejected — use
-     * `buildPartialFillScriptPQ` for those destinations. The decoded 20-byte
-     * PKH is hardcoded into the covenant (cancel branch + payment scriptPubKey).
+     * Legacy P2PKH seller (base58check, "t..." on testnet, "N..." on
+     * mainnet). Its 20-byte PKH is hardcoded as the cancel key hash and the
+     * payment output must be the P2PKH script of that same PKH. Bech32m
+     * addresses are rejected here: use `paymentAddress` + `sellerPubKeyHash`.
      */
-    sellerAddress: string;
+    sellerAddress?: string;
+    /**
+     * Destination for the XNA payment: legacy P2PKH, generic AuthScript v1
+     * (`nc1p…`), strict PQ v2 (`pq1z…`) or strict ECDSA v3 (`nq1r…`). The
+     * covenant hardcodes its full scriptPubKey. Requires `sellerPubKeyHash`.
+     */
+    paymentAddress?: string;
+    /**
+     * HASH160 of the compressed secp256k1 public key allowed to cancel the
+     * order (20 bytes). Requires `paymentAddress`.
+     */
+    sellerPubKeyHash?: Uint8Array;
     /** Name of the asset being sold (e.g. "CAT"). */
     tokenId: string;
     /**
@@ -78,11 +96,13 @@ interface ParsedPartialFillOrder {
     /** Network the parser was invoked with (used for downstream address formatting). */
     network: Network;
     /**
-     * Seller's 20-byte pubkey hash, extracted from the covenant's cancel
-     * branch. The caller can base58check-encode this with the network's
-     * legacy prefix to recover the seller address when needed.
+     * 20-byte HASH160 of the key allowed to cancel, extracted from the
+     * covenant's cancel branch. It equals the payment P2PKH hash only for
+     * orders built with `sellerAddress`.
      */
     sellerPubKeyHash: Uint8Array;
+    /** scriptPubKey bytes embedded in the covenant for the payment output. */
+    paymentScriptPubKey: Uint8Array;
     /** Asset name parsed from the covenant. */
     tokenId: string;
     /** Unit price parsed from the covenant, in XNA satoshis. */
@@ -991,7 +1011,7 @@ interface SplitAssetWrappedResult {
 declare function splitAssetWrappedScriptPubKey(spkHex: string): SplitAssetWrappedResult;
 
 /**
- * Partial-Fill Sell Order covenant script (three-branch).
+ * Partial-Fill Sell Order covenant script (three-branch), ECDSA cancel.
  *
  * The covenant has three branches selected by the top of the unlock stack:
  *
@@ -1011,11 +1031,8 @@ declare function splitAssetWrappedScriptPubKey(spkHex: string): SplitAssetWrappe
  *                                        amount == inputAmount - N)
  *   output[3+] = optional buyer change  (not constrained by the covenant)
  *
- * Continuity — the remainder UTXO reuses the spent covenant's AuthScript v1
- * commitment via `OP_OUTPUTAUTHCOMMITMENT(2) == OP_TXFIELD(0x02)` (NIP-023).
- * Comparing commitments rather than full scriptPubKeys is mandatory because
- * the remainder's asset wrapper carries a different `amountRaw` than the
- * spent UTXO's wrapper.
+ * The order must be input 0 for either fill branch to succeed: see the
+ * input-0 binding in `./fill-branches.ts`.
  *
  * Unlock stack shapes (scriptSig pushes, top → bottom):
  *
@@ -1023,10 +1040,12 @@ declare function splitAssetWrappedScriptPubKey(spkHex: string): SplitAssetWrappe
  *   Full fill:            <1>       <0>       (full-flag=1, cancel-flag=0)
  *   Partial fill:  <N>    <0>       <0>       (N, full-flag=0, cancel-flag=0)
  *
- * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`) and
- * commits to a 20-byte PKH — this variant only accepts legacy P2PKH
- * addresses as the seller destination. For AuthScript bech32m destinations
- * and post-quantum signing, use `buildPartialFillScriptPQ`.
+ * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`)
+ * against a 20-byte key hash. The payment destination is independent of
+ * that key: a legacy P2PKH seller passes `sellerAddress` (both at once),
+ * any other seller with a secp256k1 key — typically a strict ECDSA v3
+ * `nq1r…` wallet — passes `paymentAddress` and `sellerPubKeyHash`. For
+ * post-quantum cancellation use `buildPartialFillScriptPQ`.
  */
 
 /**
@@ -1058,11 +1077,11 @@ declare function buildPartialFillScriptHex(params: PartialFillOrderParams): stri
  *
  * The message that gets signed is **SHA256(OP_TXHASH(selector))** — CSFS
  * single-SHA256s its message argument before verification, and OP_TXHASH
- * produces its own 32-byte hash, so the seller computes:
- *   `sign(pqSeckey, SHA256(doubleSHA256(selected_tx_fields)))`
+ * produces its own 32-byte NIP-042 tagged hash, so the seller computes:
+ *   `sign(pqSeckey, SHA256(TaggedHash("NeuraiTxHash", mask || selected_tx_fields)))`
  *
- * Fill branches are identical in structure to the legacy variant — see
- * `./script.ts` for the three-branch layout description.
+ * The fill branches, including the input-0 binding, are shared with the
+ * ECDSA variant — see `./fill-branches.ts`.
  */
 
 declare const DEFAULT_PQ_TXHASH_SELECTOR = 511;
@@ -1185,17 +1204,15 @@ declare function buildCancelWitnessStack(signatureDer: Uint8Array, pubKey: Uint8
 declare function buildCancelWitnessStackPQ(sigPQ: Uint8Array, pubKey: Uint8Array): Uint8Array[];
 
 /**
- * Parser for the Partial-Fill Sell Order covenant (three-branch).
+ * Parser for the Partial-Fill Sell Order covenant (three-branch, ECDSA cancel).
  *
- * Extracts `(sellerPubKeyHash, unitPriceSats, tokenId)` from a scriptPubKey
- * that was produced by `buildPartialFillScript`. Walks the exact byte
- * layout emitted by the builder and fails on any deviation — this is
- * deliberate, so a downstream indexer can unambiguously classify a UTXO as
- * "partial-fill order" or "unknown script" with no false positives.
- *
- * The full-fill and partial-fill branches share `(sellerScriptPubKey,
- * unitPriceSats, tokenId)`. The parser reads both branches and verifies
- * consistency; inconsistency throws.
+ * Extracts `(sellerPubKeyHash, paymentScriptPubKey, unitPriceSats, tokenId)`
+ * from a scriptPubKey that was produced by `buildPartialFillScript`. Walks
+ * the exact byte layout emitted by the builder and fails on any deviation —
+ * this is deliberate, so a downstream indexer can unambiguously classify a
+ * UTXO as "partial-fill order" or "unknown script" with no false positives.
+ * Covenants built before the input-0 binding (neurai-scripts < 0.10.0) are
+ * rejected: their fill branches can be drained through a foreign input 0.
  */
 
 /**
@@ -1210,9 +1227,8 @@ declare function parsePartialFillScript(script: Uint8Array | string, network?: N
  * payment scriptPubKey bytes (which may be P2PKH or AuthScript) and the
  * configured TXHASH selector.
  *
- * The full-fill and partial-fill branches share `(paymentScriptPubKey,
- * unitPriceSats, tokenId)`. The parser reads both branches and verifies
- * consistency; inconsistency throws.
+ * The fill branches (and their input-0 binding) are read by the shared
+ * `readFillBranches`; covenants built before the binding are rejected.
  */
 
 /** Quick discriminator without throwing — useful for indexers. */

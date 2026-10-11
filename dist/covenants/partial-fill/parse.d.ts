@@ -1,15 +1,13 @@
 /**
- * Parser for the Partial-Fill Sell Order covenant (three-branch).
+ * Parser for the Partial-Fill Sell Order covenant (three-branch, ECDSA cancel).
  *
- * Extracts `(sellerPubKeyHash, unitPriceSats, tokenId)` from a scriptPubKey
- * that was produced by `buildPartialFillScript`. Walks the exact byte
- * layout emitted by the builder and fails on any deviation — this is
- * deliberate, so a downstream indexer can unambiguously classify a UTXO as
- * "partial-fill order" or "unknown script" with no false positives.
- *
- * The full-fill and partial-fill branches share `(sellerScriptPubKey,
- * unitPriceSats, tokenId)`. The parser reads both branches and verifies
- * consistency; inconsistency throws.
+ * Extracts `(sellerPubKeyHash, paymentScriptPubKey, unitPriceSats, tokenId)`
+ * from a scriptPubKey that was produced by `buildPartialFillScript`. Walks
+ * the exact byte layout emitted by the builder and fails on any deviation —
+ * this is deliberate, so a downstream indexer can unambiguously classify a
+ * UTXO as "partial-fill order" or "unknown script" with no false positives.
+ * Covenants built before the input-0 binding (neurai-scripts < 0.10.0) are
+ * rejected: their fill branches can be drained through a foreign input 0.
  */
 import type { Network, ParsedPartialFillOrder } from '../../types.js';
 /**

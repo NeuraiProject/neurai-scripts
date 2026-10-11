@@ -45,17 +45,35 @@ export interface PartialFillExpiration {
      */
     value: bigint;
 }
+/**
+ * Seller of an ECDSA-cancel order, in one of two forms:
+ *   - `sellerAddress` alone: a legacy P2PKH address that is both the
+ *     payment destination and the cancel key hash;
+ *   - `paymentAddress` with `sellerPubKeyHash`: any payment destination
+ *     and the HASH160 of the secp256k1 key that may cancel. This is the
+ *     form for a strict ECDSA v3 (`nq1r…`) seller, whose address program is
+ *     a commitment and not a key hash.
+ * Passing both forms, or neither, throws.
+ */
 export interface PartialFillOrderParams {
     /**
-     * Seller destination. Must be a legacy P2PKH address (base58check,
-     * "t..." on testnet, "N..." on mainnet). The legacy covenant uses
-     * `OP_HASH160 + OP_CHECKSIG` in its cancel branch, so every bech32m
-     * address (AuthScript v1 `nc1p…`, PQ v2 `pq1z…` and ECDSA v3 `nq1r…`,
-     * whose program is a commitment, not a key hash) is rejected — use
-     * `buildPartialFillScriptPQ` for those destinations. The decoded 20-byte
-     * PKH is hardcoded into the covenant (cancel branch + payment scriptPubKey).
+     * Legacy P2PKH seller (base58check, "t..." on testnet, "N..." on
+     * mainnet). Its 20-byte PKH is hardcoded as the cancel key hash and the
+     * payment output must be the P2PKH script of that same PKH. Bech32m
+     * addresses are rejected here: use `paymentAddress` + `sellerPubKeyHash`.
      */
-    sellerAddress: string;
+    sellerAddress?: string;
+    /**
+     * Destination for the XNA payment: legacy P2PKH, generic AuthScript v1
+     * (`nc1p…`), strict PQ v2 (`pq1z…`) or strict ECDSA v3 (`nq1r…`). The
+     * covenant hardcodes its full scriptPubKey. Requires `sellerPubKeyHash`.
+     */
+    paymentAddress?: string;
+    /**
+     * HASH160 of the compressed secp256k1 public key allowed to cancel the
+     * order (20 bytes). Requires `paymentAddress`.
+     */
+    sellerPubKeyHash?: Uint8Array;
     /** Name of the asset being sold (e.g. "CAT"). */
     tokenId: string;
     /**
@@ -78,11 +96,13 @@ export interface ParsedPartialFillOrder {
     /** Network the parser was invoked with (used for downstream address formatting). */
     network: Network;
     /**
-     * Seller's 20-byte pubkey hash, extracted from the covenant's cancel
-     * branch. The caller can base58check-encode this with the network's
-     * legacy prefix to recover the seller address when needed.
+     * 20-byte HASH160 of the key allowed to cancel, extracted from the
+     * covenant's cancel branch. It equals the payment P2PKH hash only for
+     * orders built with `sellerAddress`.
      */
     sellerPubKeyHash: Uint8Array;
+    /** scriptPubKey bytes embedded in the covenant for the payment output. */
+    paymentScriptPubKey: Uint8Array;
     /** Asset name parsed from the covenant. */
     tokenId: string;
     /** Unit price parsed from the covenant, in XNA satoshis. */

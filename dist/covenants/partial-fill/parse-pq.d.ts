@@ -4,9 +4,8 @@
  * payment scriptPubKey bytes (which may be P2PKH or AuthScript) and the
  * configured TXHASH selector.
  *
- * The full-fill and partial-fill branches share `(paymentScriptPubKey,
- * unitPriceSats, tokenId)`. The parser reads both branches and verifies
- * consistency; inconsistency throws.
+ * The fill branches (and their input-0 binding) are read by the shared
+ * `readFillBranches`; covenants built before the binding are rejected.
  */
 import type { Network, ParsedPartialFillOrderPQ } from '../../types.js';
 /** Quick discriminator without throwing — useful for indexers. */

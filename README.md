@@ -359,6 +359,22 @@ checked against the covenant's hardcoded parameters using
 `OP_OUTPUTASSETFIELD`, `OP_OUTPUTSCRIPT` and `OP_OUTPUTVALUE`. Consensus
 enforces every rule; there is no trusted off-chain layer.
 
+**The order is always input 0.** `OP_INPUTASSETFIELD` takes an absolute
+input index and Script cannot ask for the index of the input being
+evaluated, so both fill branches open with an input-0 binding:
+
+```
+<0x80 0x00> OP_TXHASH <OP_TXHASH(0x0080) at input 0> OP_EQUALVERIFY
+```
+
+NIP-042 mask `0x0080` commits only to the current input index, so the
+digest matches the hardcoded constant only when the order is spent as
+input 0. Without it (covenants built before 0.10.0) a buyer could put a
+foreign asset UTXO at input 0 to price the fill and take the rest of the
+order through an unconstrained output, or settle several identical orders
+with one payment. A transaction can fill at most one order; the cancel
+branch is not bound.
+
 Three spending branches are selected by the top of the unlock stack:
 
 - `OP_IF` (unlock pushed `1`) — **Cancel**. The seller signs and
@@ -436,15 +452,23 @@ const scriptPubKeyHex = buildPartialFillScriptHex({
     value: 1_250_000n                // fills are rejected at/after this value
   }
 });
-// Throws if the address is not a legacy P2PKH — the legacy covenant uses
-// OP_HASH160 + OP_CHECKSIG on the cancel branch and cannot commit to an
-// AuthScript program. Use `buildPartialFillScriptPQ` for bech32m / PQ
-// destinations.
+// `sellerAddress` must be a legacy P2PKH: it is both the payment
+// destination and the cancel key hash.
+
+// A seller with another secp256k1 address (a strict ECDSA v3 `tnq1r…`
+// wallet) is paid at that address and cancels with the same key:
+const v3OrderHex = buildPartialFillScriptHex({
+  paymentAddress: aliceV3Address,           // any address type
+  sellerPubKeyHash: hash160(alicePubKey33), // key allowed to cancel
+  tokenId: 'CAT',
+  unitPriceSats: 100_000_000n
+});
+// Use `buildPartialFillScriptPQ` to cancel with an ML-DSA-44 key.
 
 // 2) Bob spends 5 CAT from the covenant.
 const bobScriptSigHex = buildFillScriptSigHex(5n);
 // Fill-tx layout (built with neurai-create-transaction):
-//   vin[0]   = covenant UTXO, scriptSig = bobScriptSigHex
+//   vin[0]   = covenant UTXO (must be input 0), scriptSig = bobScriptSigHex
 //   vin[1+]  = buyer's XNA inputs (standard P2PKH, SIGHASH_ALL)
 //   vout[0]  = unitPriceSats * 5 XNA to Alice
 //   vout[1]  = 5 CAT to Bob
@@ -460,29 +484,29 @@ for (const utxo of candidateUtxos) {
   try {
     const order = parsePartialFillScript(utxo.scriptPubKeyHex, 'xna-test');
     // order.tokenId, order.unitPriceSats, order.sellerPubKeyHash,
-    // order.expiration, order.network
-    // The parser returns the 20-byte PKH; base58check-encode with the
-    // network's legacy prefix (0x35 mainnet / 0x7f testnet) if you need
-    // to display the seller's address.
+    // order.paymentScriptPubKey, order.expiration, order.network
+    // sellerPubKeyHash is the cancel key; paymentScriptPubKey is where
+    // fills pay (the P2PKH of that same hash for sellerAddress orders).
   } catch {
     // not a partial-fill covenant, skip
   }
 }
 ```
 
-#### Script layout (legacy, three-branch)
+#### Script layout (ECDSA cancel, three-branch)
 
 ```
 OP_IF                                                              // cancel branch
   OP_DUP OP_HASH160 <sellerPKH> OP_EQUALVERIFY OP_CHECKSIG
 OP_ELSE
+  <0x80 0x00> OP_TXHASH <INPUT_ZERO_TXHASH> OP_EQUALVERIFY         // order is input 0
   OP_IF                                                            // full-fill branch
     # Stack entering: [ ]  (scriptSig pushed <1> <0>)
     # Optional expiry: <deadline> <HEIGHT|MTP> OP_CHAINCONTEXT OP_GREATERTHAN OP_VERIFY
     <0> <0x02> OP_INPUTASSETFIELD                                  // N = inputAmount
     OP_DUP <unitPriceSats> OP_MUL
         <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY // payment value
-    <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY               // payment dest
+    <0> OP_OUTPUTSCRIPT <paymentSpk> OP_EQUALVERIFY                // payment dest
     OP_DUP <1> <0x02> OP_OUTPUTASSETFIELD OP_EQUALVERIFY           // buyer amount == N
     <1> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY        // buyer name
     OP_DROP OP_1                                                   // no vout[2] required
@@ -491,7 +515,7 @@ OP_ELSE
     # Optional expiry: <deadline> <HEIGHT|MTP> OP_CHAINCONTEXT OP_GREATERTHAN OP_VERIFY
     OP_DUP <unitPriceSats> OP_MUL
         <0> OP_OUTPUTVALUE OP_SWAP OP_GREATERTHANOREQUAL OP_VERIFY // payment value
-    <0> OP_OUTPUTSCRIPT <sellerP2PKH> OP_EQUALVERIFY               // payment dest
+    <0> OP_OUTPUTSCRIPT <paymentSpk> OP_EQUALVERIFY                // payment dest
     OP_DUP <1> <0x02> OP_OUTPUTASSETFIELD OP_EQUALVERIFY           // buyer amount == N
     <1> <0x01> OP_OUTPUTASSETFIELD <tokenId> OP_EQUALVERIFY        // buyer name
     <2> OP_OUTPUTAUTHCOMMITMENT <0x02> OP_TXFIELD OP_EQUALVERIFY   // continuity (NIP-023)
@@ -509,6 +533,7 @@ OP_ENDIF
 - **No `MinFill` / `MaxFill` / `Expiry`.** Planned for v0.2.
 - **Fixed output layout** (`vout[0..2]`). The covenant rejects
   reorderings. Buyer change must go to `vout[3+]`.
+- **One order per transaction**, always at `vin[0]` (input-0 binding).
 - **AMM is out of scope.** Covered by a later phase of the NIP roadmap.
 
 ### Partial-Fill PQ variant (post-quantum seller, NIP-18)
@@ -519,12 +544,12 @@ ECDSA `OP_CHECKSIG`. NIP-18 raises the per-element push cap to 3072 B so
 the ~2421 B signature and ~1313 B pubkey fit as stack items. All three
 are active on DePIN-Test testnet.
 
-| | Legacy | PQ |
+| | ECDSA (`buildPartialFillScript`) | PQ |
 |---|---|---|
 | Cancel sig scheme | ECDSA secp256k1 | ML-DSA-44 (~2421 B sig, ~1313 B pubkey) |
 | Cancel verifier | `OP_DUP OP_HASH160 <PKH> OP_EQUALVERIFY OP_CHECKSIG` | `OP_DUP OP_SHA256 <commitment> OP_EQUALVERIFY <selector> OP_TXHASH OP_SWAP OP_CHECKSIGFROMSTACK` |
 | What Alice signs | tx sighash (standard) | `SHA256(OP_TXHASH(selector))` — CSFS single-SHA256s the message |
-| Payment destination | P2PKH only | P2PKH **or** any AuthScript bech32m address — `nc1p` v1, `pq1z` v2, `nq1r` v3 (scriptPubKey bytes hardcoded, `OP_1`/`OP_2`/`OP_3` included) |
+| Payment destination | `sellerAddress` P2PKH, or any address with `paymentAddress` + `sellerPubKeyHash` | P2PKH **or** any AuthScript bech32m address — `nc1p` v1, `pq1z` v2, `nq1r` v3 (scriptPubKey bytes hardcoded, `OP_1`/`OP_2`/`OP_3` included) |
 
 ```ts
 import {
@@ -564,7 +589,7 @@ OP_IF                                // scriptSig pushed <sig> <pubKey> OP_1
   OP_SWAP
   OP_CHECKSIGFROMSTACK               // verifies sig over SHA256(msg) for pubKey
 OP_ELSE
-  ... partial-fill branch (identical to legacy) ...
+  ... input-0 binding + fill branches (identical to the ECDSA variant) ...
 OP_ENDIF
 ```
 
@@ -637,6 +662,32 @@ consumable; callers import directly from the package root.
 ---
 
 ## Version notes
+
+### 0.10.0
+
+Security fix for the partial-fill covenant. Orders built with an earlier
+version stay exposed until they are cancelled: cancel them with
+neurai-sign-transaction 3.1.0 (the last release whose parser reads them)
+and publish them again.
+
+- **Input-0 binding.** The fill branches read the order amount from input 0
+  but did not check that the order was input 0. A buyer could place a
+  foreign asset UTXO at input 0 and take the whole order for the price of
+  that UTXO, or settle several identical orders with one payment (both
+  reproduced against a regtest node). Both fill branches now open with
+  `<0x80 0x00> OP_TXHASH <OP_TXHASH(0x0080) at input 0> OP_EQUALVERIFY`,
+  so an order can only be filled as input 0 and at most one order per
+  transaction. Requires NIP-042 `OP_TXHASH`.
+- `parsePartialFillScript` / `parsePartialFillScriptPQ` reject covenants
+  without the binding, so signers refuse to treat old orders as fillable or
+  cancellable through them.
+- ECDSA-cancel orders take `paymentAddress` + `sellerPubKeyHash` as an
+  alternative to `sellerAddress`: the payment destination can be any
+  address type (for example the strict ECDSA v3 `nq1r…` wallet of the key
+  that cancels). `ParsedPartialFillOrder` gains `paymentScriptPubKey`, and
+  the parser no longer requires it to be the P2PKH of `sellerPubKeyHash`.
+- Both variants share one implementation of the fill branches
+  (`covenants/partial-fill/fill-branches.ts`).
 
 ### 0.9.2
 

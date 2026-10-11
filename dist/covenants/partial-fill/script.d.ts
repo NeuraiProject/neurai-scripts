@@ -1,5 +1,5 @@
 /**
- * Partial-Fill Sell Order covenant script (three-branch).
+ * Partial-Fill Sell Order covenant script (three-branch), ECDSA cancel.
  *
  * The covenant has three branches selected by the top of the unlock stack:
  *
@@ -19,11 +19,8 @@
  *                                        amount == inputAmount - N)
  *   output[3+] = optional buyer change  (not constrained by the covenant)
  *
- * Continuity — the remainder UTXO reuses the spent covenant's AuthScript v1
- * commitment via `OP_OUTPUTAUTHCOMMITMENT(2) == OP_TXFIELD(0x02)` (NIP-023).
- * Comparing commitments rather than full scriptPubKeys is mandatory because
- * the remainder's asset wrapper carries a different `amountRaw` than the
- * spent UTXO's wrapper.
+ * The order must be input 0 for either fill branch to succeed: see the
+ * input-0 binding in `./fill-branches.ts`.
  *
  * Unlock stack shapes (scriptSig pushes, top → bottom):
  *
@@ -31,10 +28,12 @@
  *   Full fill:            <1>       <0>       (full-flag=1, cancel-flag=0)
  *   Partial fill:  <N>    <0>       <0>       (N, full-flag=0, cancel-flag=0)
  *
- * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`) and
- * commits to a 20-byte PKH — this variant only accepts legacy P2PKH
- * addresses as the seller destination. For AuthScript bech32m destinations
- * and post-quantum signing, use `buildPartialFillScriptPQ`.
+ * The cancel branch uses classical ECDSA (`OP_HASH160 + OP_CHECKSIG`)
+ * against a 20-byte key hash. The payment destination is independent of
+ * that key: a legacy P2PKH seller passes `sellerAddress` (both at once),
+ * any other seller with a secp256k1 key — typically a strict ECDSA v3
+ * `nq1r…` wallet — passes `paymentAddress` and `sellerPubKeyHash`. For
+ * post-quantum cancellation use `buildPartialFillScriptPQ`.
  */
 import type { PartialFillOrderParams } from '../../types.js';
 export { encodeP2PKHScriptPubKey } from '../../standard/p2pkh.js';
