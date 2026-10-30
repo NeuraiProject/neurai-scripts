@@ -71,6 +71,7 @@ src/
 │   └── index.ts            Barrel
 ├── covenants/              Covenant scripts
 │   ├── partial-fill/       Legacy (ECDSA cancel) + PQ (ML-DSA-44 via CSFS)
+│   ├── asset-auth/         P2AH custody (NIP-054 OP_CHECKASSETAUTH): policy, proposal hash, vote lock
 │   └── index.ts            Barrel
 ├── address.ts              encodeSellerScriptPubKey (bech32m / base58check → spk)
 ├── types.ts                Public types
@@ -125,7 +126,7 @@ stack, arithmetic, bitwise, crypto) plus every DePIN-Test addition
 `OP_INPUTASSETFIELD`, `OP_REFINPUTCOUNT`/`OP_REFINPUTFIELD`/
 `OP_REFINPUTASSETFIELD`, `OP_CHAINCONTEXT`, `OP_CAT`, `OP_SPLIT`,
 `OP_REVERSEBYTES`, `OP_OUTPUTAUTHDEST`, `OP_ZKVERIFY`, `OP_INPUTFIELD`,
-64-bit `OP_MUL`/`OP_DIV`/`OP_MOD`).
+`OP_CHECKASSETAUTH` (NIP-054), 64-bit `OP_MUL`/`OP_DIV`/`OP_MOD`).
 
 Also exports selector tables:
 
@@ -593,6 +594,66 @@ OP_ELSE
 OP_ENDIF
 ```
 
+### P2AH custody (NIP-054 `OP_CHECKASSETAUTH`)
+
+A custody is a generic AuthScript v1 (NoAuth) address whose witnessScript is
+a policy: M of N owner-token roles (`NAME!`, `&NAME!`) must approve a spend,
+G of them when an owner token held by the custody leaves it. Whoever holds a
+role's owner token can approve. Active on testnet from block 100 and on
+regtest from block 0; not scheduled on mainnet. The node rules are in
+`doc/covenants.md` of Neurai.
+
+```ts
+import { getNoAuthAddress } from '@neuraiproject/neurai-key';
+import {
+  assetAuthProposalHash, buildAssetAuthArgs, buildAssetAuthPolicyScript,
+  buildAssetAuthVoteExecuteArgs, buildAssetAuthVoteLockScript,
+  buildAuthScriptWitnessNoAuth, bytesToHex
+} from '@neuraiproject/neurai-scripts';
+
+// <1> <M> <G> <role_1> ... <role_n> <n> OP_CHECKASSETAUTH, roles sorted by bytes.
+const policy = buildAssetAuthPolicyScript({ M: 2, G: 3, roles: ['OPS!', 'ADMIN!', 'BOARD!'] });
+const custody = getNoAuthAddress('xna-authscript-test', { witnessScript: policy });
+```
+
+**Synchronous spend.** The approving owner tokens are inputs of the same
+transaction, spent from P2PKH or a strict v2/v3 address and signed with
+`SIGHASH_ALL`. The custody input takes `c a b T` all 0:
+
+```ts
+const witness = buildAuthScriptWitnessNoAuth({ args: buildAssetAuthArgs(), witnessScript: policy });
+// neurai-sign-transaction: { authType: 0, witnessScript: bytesToHex(policy), functionalArgs: ['', '', '', ''] }
+```
+
+**Votes (asynchronous spend).** A proposal fixes the custody inputs
+`0..c-1`, the first `a` and the last `b` outputs, and an expiry height `T`;
+its hash `H` does not cover the rest, so votes can be cast on a skeleton
+before the execution exists. A holder votes by sending its owner token, with
+`bytesToHex(H)` as the 64-hex transfer message (`createTransferWithMessageOutput`;
+an IPFS message counts as a vote for another proposal), to a vote lock:
+
+```ts
+const H = assetAuthProposalHash({ rawTx: skeletonHex, chain: 'testnet', c: 1, a: 2, b: 0, T });
+const lock = buildAssetAuthVoteLockScript({ T, custodyCommitment: custody.commitment, returnScriptPubKey });
+const lockAddress = getNoAuthAddress('xna-authscript-test', { witnessScript: lock }).address;
+```
+
+`returnScriptPubKey` is the transfer of the owner token, amount 1, back to
+its holder. Anyone then executes: the custody input with
+`buildAssetAuthArgs({ c, a, b, T })`, each vote with
+`buildAssetAuthVoteExecuteArgs({ custodyInput, returnOutput })`, every vote
+returned at its `returnOutput`, plus fee inputs and plain XNA change. After
+`T` the holder takes an unused vote back with `buildAssetAuthVoteReturnArgs`.
+With a vote the node also checks the shape of the execution (inputs from `c`
+on are approvals or carry no asset, outputs between the prefix and the
+suffix are returns or plain XNA change, the change is at most the XNA of
+those inputs).
+
+`parseAssetAuthPolicyScript` reads a policy back, and
+`buildAssetAuthProposalMessage` returns the bytes that `H` hashes.
+`assetAuthProposalHash` matches the vectors of the node's
+`proposal_hash_vectors` test.
+
 ---
 
 ## Network handling
@@ -662,6 +723,16 @@ consumable; callers import directly from the package root.
 ---
 
 ## Version notes
+
+### Unreleased
+
+- P2AH custody (NIP-054 `OP_CHECKASSETAUTH`, slot `0xdf`): `opcodes.OP_CHECKASSETAUTH`,
+  `buildAssetAuthPolicyScript` / `parseAssetAuthPolicyScript`, `buildAssetAuthArgs`,
+  `assetAuthProposalHash` / `buildAssetAuthProposalMessage`, `buildAssetAuthVoteLockScript`,
+  `buildAssetAuthVoteExecuteArgs` and `buildAssetAuthVoteReturnArgs`. Checked against a regtest
+  node built from Neurai `c665ba3` (`tests/node-regtest-assetauth.test.ts`).
+- New dependency `@noble/hashes` (SHA-256 of the proposal hash); it already came with
+  neurai-create-transaction.
 
 ### 0.10.0
 

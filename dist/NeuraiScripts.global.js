@@ -6,25 +6,25 @@ var NeuraiScriptsBundle = (function (exports) {
      * duplicated here to keep this package free of runtime coupling beyond its
      * declared `dependencies` field. All sizes are little-endian, per Neurai.
      */
-    function ensureHex(hex, label = 'hex') {
+    function ensureHex$1(hex, label = 'hex') {
         const normalized = String(hex || '').trim().toLowerCase();
         if (!/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) {
             throw new Error(`Invalid ${label}: expected even-length hex string`);
         }
         return normalized;
     }
-    function hexToBytes(hex) {
-        const normalized = ensureHex(hex);
+    function hexToBytes$1(hex) {
+        const normalized = ensureHex$1(hex);
         const bytes = new Uint8Array(normalized.length / 2);
         for (let i = 0; i < normalized.length; i += 2) {
             bytes[i / 2] = Number.parseInt(normalized.slice(i, i + 2), 16);
         }
         return bytes;
     }
-    function bytesToHex(bytes) {
+    function bytesToHex$1(bytes) {
         return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
     }
-    function concatBytes(...parts) {
+    function concatBytes$1(...parts) {
         const total = parts.reduce((sum, part) => sum + part.length, 0);
         const out = new Uint8Array(total);
         let offset = 0;
@@ -46,7 +46,7 @@ var NeuraiScriptsBundle = (function (exports) {
 
     /** Exact monetary primitives. This module has no runtime dependencies. */
     /** Normalize a raw integer without preserving an already rounded number. */
-    function toRawInteger(value, label = 'amount') {
+    function toRawInteger$1(value, label = 'amount') {
         if (typeof value === 'bigint')
             return value;
         if (typeof value === 'number' && Number.isSafeInteger(value))
@@ -188,6 +188,10 @@ var NeuraiScriptsBundle = (function (exports) {
     // 0xde. Stack contract: (sig, count, pubkey -- count + 0|1). Works with
     // both legacy secp256k1 and PQ ML-DSA-44 keys via CPubKey::Verify().
     const OP_CHECKSIGADD = 0xde;
+    // NIP-054 (P2AH): M-of-N authorization by owner-token roles in slot 0xdf,
+    // AuthScript only. Stack contract: (c a b T 1 M G role_1 .. role_n n -- 1),
+    // failing the script instead of pushing 0. See covenants/asset-auth.
+    const OP_CHECKASSETAUTH = 0xdf;
     // ---------- Expansion / NOPs ----------
     // Only the NOPs not aliased by DePIN-Test opcodes are exported as NOPs.
     //   OP_NOP2 == OP_CHECKLOCKTIMEVERIFY (0xb1)
@@ -346,6 +350,7 @@ var NeuraiScriptsBundle = (function (exports) {
         OP_BOOLOR: OP_BOOLOR,
         OP_CAT: OP_CAT,
         OP_CHAINCONTEXT: OP_CHAINCONTEXT,
+        OP_CHECKASSETAUTH: OP_CHECKASSETAUTH,
         OP_CHECKLOCKTIMEVERIFY: OP_CHECKLOCKTIMEVERIFY,
         OP_CHECKMERKLEINCLUSION: OP_CHECKMERKLEINCLUSION,
         OP_CHECKMULTISIG: OP_CHECKMULTISIG,
@@ -460,7 +465,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * - otherwise: sign-magnitude little-endian, with a sign bit on the last byte
      */
     function encodeScriptNum(value) {
-        let n = toRawInteger(value, 'ScriptNum');
+        let n = toRawInteger$1(value, 'ScriptNum');
         if (n === 0n)
             return new Uint8Array();
         const negative = n < 0n;
@@ -499,13 +504,13 @@ var NeuraiScriptsBundle = (function (exports) {
             return Uint8Array.of(OP_0);
         }
         if (data.length <= 75) {
-            return concatBytes(Uint8Array.of(data.length), data);
+            return concatBytes$1(Uint8Array.of(data.length), data);
         }
         if (data.length <= 0xff) {
-            return concatBytes(Uint8Array.of(0x4c, data.length), data);
+            return concatBytes$1(Uint8Array.of(0x4c, data.length), data);
         }
         if (data.length <= 3072) {
-            return concatBytes(Uint8Array.of(0x4d, data.length & 0xff, (data.length >> 8) & 0xff), data);
+            return concatBytes$1(Uint8Array.of(0x4d, data.length & 0xff, (data.length >> 8) & 0xff), data);
         }
         throw new Error(`pushBytes: element of ${data.length} bytes exceeds MAX_PQ_SCRIPT_ELEMENT_SIZE (3072)`);
     }
@@ -514,7 +519,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * when available to match how the node's own templates look on the wire.
      */
     function pushInt(value) {
-        const n = toRawInteger(value, 'ScriptNum');
+        const n = toRawInteger$1(value, 'ScriptNum');
         if (n === -1n)
             return Uint8Array.of(OP_1NEGATE);
         if (n === 0n)
@@ -525,7 +530,7 @@ var NeuraiScriptsBundle = (function (exports) {
         return pushBytes(encodeScriptNum(n));
     }
     function pushHex(hex) {
-        return pushBytes(hexToBytes(hex));
+        return pushBytes(hexToBytes$1(hex));
     }
     /** Fluent assembler for readable script definitions. */
     class ScriptBuilder {
@@ -556,10 +561,10 @@ var NeuraiScriptsBundle = (function (exports) {
             return this;
         }
         build() {
-            return concatBytes(...this.parts);
+            return concatBytes$1(...this.parts);
         }
         buildHex() {
-            return bytesToHex(this.build());
+            return bytesToHex$1(this.build());
         }
     }
 
@@ -571,7 +576,7 @@ var NeuraiScriptsBundle = (function (exports) {
         if (!(pubKeyHash instanceof Uint8Array) || pubKeyHash.length !== 20) {
             throw new Error('P2PKH pubKeyHash must be a 20-byte Uint8Array');
         }
-        return concatBytes(Uint8Array.of(OP_DUP, OP_HASH160, 0x14), pubKeyHash, Uint8Array.of(OP_EQUALVERIFY, OP_CHECKSIG));
+        return concatBytes$1(Uint8Array.of(OP_DUP, OP_HASH160, 0x14), pubKeyHash, Uint8Array.of(OP_EQUALVERIFY, OP_CHECKSIG));
     }
 
     /**
@@ -585,7 +590,7 @@ var NeuraiScriptsBundle = (function (exports) {
         if (!(pubKeyHash instanceof Uint8Array) || pubKeyHash.length !== 20) {
             throw new Error('P2WPKH pubKeyHash must be a 20-byte Uint8Array');
         }
-        return concatBytes(Uint8Array.of(OP_0, 0x14), pubKeyHash);
+        return concatBytes$1(Uint8Array.of(OP_0, 0x14), pubKeyHash);
     }
 
     /**
@@ -600,7 +605,7 @@ var NeuraiScriptsBundle = (function (exports) {
         if (!(witnessScriptSha256 instanceof Uint8Array) || witnessScriptSha256.length !== 32) {
             throw new Error('P2WSH witnessScriptSha256 must be a 32-byte Uint8Array');
         }
-        return concatBytes(Uint8Array.of(OP_0, 0x20), witnessScriptSha256);
+        return concatBytes$1(Uint8Array.of(OP_0, 0x20), witnessScriptSha256);
     }
 
     /**
@@ -658,7 +663,7 @@ var NeuraiScriptsBundle = (function (exports) {
         if (opcode === undefined) {
             throw new Error(`AuthScript witness version must be 1, 2 or 3, got ${String(witnessVersion)}`);
         }
-        return concatBytes(Uint8Array.of(opcode, 0x20), program);
+        return concatBytes$1(Uint8Array.of(opcode, 0x20), program);
     }
     function assertWitnessScript(ws) {
         if (!(ws instanceof Uint8Array) || ws.length === 0) {
@@ -836,7 +841,7 @@ var NeuraiScriptsBundle = (function (exports) {
         const parts = [Uint8Array.of(OP_RETURN)];
         for (const p of payloads)
             parts.push(pushBytes(p));
-        return concatBytes(...parts);
+        return concatBytes$1(...parts);
     }
 
     /**
@@ -873,10 +878,10 @@ var NeuraiScriptsBundle = (function (exports) {
             parts.push(pushBytes(pk));
         parts.push(pushInt(pubKeys.length));
         parts.push(Uint8Array.of(OP_CHECKMULTISIG));
-        return concatBytes(...parts);
+        return concatBytes$1(...parts);
     }
     function encodeMultisigRedeemScriptHex(params) {
-        return bytesToHex(encodeMultisigRedeemScript(params));
+        return bytesToHex$1(encodeMultisigRedeemScript(params));
     }
     /**
      * P2SH scriptPubKey wrapping any redeem script. Pass the 20-byte HASH160 of
@@ -887,10 +892,98 @@ var NeuraiScriptsBundle = (function (exports) {
         if (!(redeemScriptHash160 instanceof Uint8Array) || redeemScriptHash160.length !== 20) {
             throw new Error('redeemScriptHash160 must be a 20-byte Uint8Array');
         }
-        return concatBytes(Uint8Array.of(OP_HASH160, 0x14), redeemScriptHash160, Uint8Array.of(OP_EQUAL));
+        return concatBytes$1(Uint8Array.of(OP_HASH160, 0x14), redeemScriptHash160, Uint8Array.of(OP_EQUAL));
     }
 
     /** Exact monetary primitives. This module has no runtime dependencies. */
+    /** Normalize a raw integer without preserving an already rounded number. */
+    function toRawInteger(value, label = 'amount') {
+        if (typeof value === 'bigint')
+            return value;
+        if (typeof value === 'number' && Number.isSafeInteger(value))
+            return BigInt(value);
+        if (typeof value === 'string' && /^-?\d+$/.test(value) && value.length <= 100)
+            return BigInt(value);
+        throw new Error(`${label}: expected an exact integer; use bigint or an integer string for large values`);
+    }
+
+    function ensureHex(hex, label = 'hex') {
+        const normalized = String(hex || '').trim().toLowerCase();
+        if (!/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) {
+            throw new Error(`Invalid ${label}: expected even-length hex string`);
+        }
+        return normalized;
+    }
+    function hexToBytes(hex) {
+        const normalized = ensureHex(hex);
+        const bytes = new Uint8Array(normalized.length / 2);
+        for (let i = 0; i < normalized.length; i += 2) {
+            bytes[i / 2] = Number.parseInt(normalized.slice(i, i + 2), 16);
+        }
+        return bytes;
+    }
+    function bytesToHex(bytes) {
+        return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+    }
+    function concatBytes(...parts) {
+        const total = parts.reduce((sum, part) => sum + part.length, 0);
+        const out = new Uint8Array(total);
+        let offset = 0;
+        for (const part of parts) {
+            out.set(part, offset);
+            offset += part.length;
+        }
+        return out;
+    }
+    function reverseBytes(bytes) {
+        return Uint8Array.from(Array.from(bytes).reverse());
+    }
+    function u32LE(value) {
+        if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+            throw new Error(`uint32 out of range: ${value}`);
+        }
+        const out = new Uint8Array(4);
+        const view = new DataView(out.buffer);
+        view.setUint32(0, value, true);
+        return out;
+    }
+    function u64LE(value) {
+        const bigintValue = toRawInteger(value);
+        if (bigintValue < 0n || bigintValue > 0xffffffffffffffffn) {
+            throw new Error(`uint64 out of range: ${bigintValue}`);
+        }
+        const out = new Uint8Array(8);
+        let remaining = bigintValue;
+        for (let i = 0; i < 8; i += 1) {
+            out[i] = Number(remaining & 0xffn);
+            remaining >>= 8n;
+        }
+        return out;
+    }
+    function compactSize$1(value) {
+        const bigintValue = toRawInteger(value);
+        if (bigintValue < 0n)
+            throw new Error('CompactSize cannot encode negative numbers');
+        if (bigintValue < 253n) {
+            return Uint8Array.of(Number(bigintValue));
+        }
+        if (bigintValue <= 0xffffn) {
+            return concatBytes(Uint8Array.of(0xfd), u16LE(Number(bigintValue)));
+        }
+        if (bigintValue <= 0xffffffffn) {
+            return concatBytes(Uint8Array.of(0xfe), u32LE(Number(bigintValue)));
+        }
+        return concatBytes(Uint8Array.of(0xff), u64LE(bigintValue));
+    }
+    function u16LE(value) {
+        if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+            throw new Error(`uint16 out of range: ${value}`);
+        }
+        const out = new Uint8Array(2);
+        const view = new DataView(out.buffer);
+        view.setUint16(0, value, true);
+        return out;
+    }
 
     // base-x encoding / decoding
     // Copyright (c) 2018 base-x contributors
@@ -1750,6 +1843,177 @@ var NeuraiScriptsBundle = (function (exports) {
             throw legacyError;
         }
     }
+    function serializeOutput(output) {
+        const scriptPubKey = hexToBytes(ensureHex(output.scriptPubKeyHex, 'scriptPubKeyHex'));
+        return concatBytes(u64LE(output.valueSats), compactSize$1(scriptPubKey.length), scriptPubKey);
+    }
+
+    // Hard deserialization bound, mirroring the node (serialize.h MAX_SIZE):
+    // ReadCompactSize rejects anything above it, canonical or not.
+    const MAX_SIZE = 0x02000000;
+    class ByteReader {
+        bytes;
+        offset = 0;
+        constructor(bytes) {
+            this.bytes = bytes;
+        }
+        need(count) {
+            if (count > this.bytes.length - this.offset) {
+                throw new Error(`Transaction hex truncated: need ${count} more byte(s) at offset ${this.offset}, ` +
+                    `${this.bytes.length - this.offset} remaining`);
+            }
+        }
+        readBytes(count) {
+            this.need(count);
+            const slice = this.bytes.subarray(this.offset, this.offset + count);
+            this.offset += count;
+            return slice;
+        }
+        readU8() {
+            return this.readBytes(1)[0];
+        }
+        readU32() {
+            const slice = this.readBytes(4);
+            return (slice[0] | (slice[1] << 8) | (slice[2] << 16) | (slice[3] << 24)) >>> 0;
+        }
+        readU64() {
+            const slice = this.readBytes(8);
+            let value = 0n;
+            for (let i = 7; i >= 0; i -= 1) {
+                value = (value << 8n) | BigInt(slice[i]);
+            }
+            return value;
+        }
+        // Canonical CompactSize with the node's range bound: the shortest encoding
+        // is mandatory and anything above MAX_SIZE throws, exactly like
+        // ReadCompactSize. Lengths are validated against the remaining bytes by the
+        // callers BEFORE any allocation or iteration.
+        readCompactSize() {
+            const first = this.readU8();
+            let value;
+            if (first < 0xfd) {
+                value = first;
+            }
+            else if (first === 0xfd) {
+                const slice = this.readBytes(2);
+                value = slice[0] | (slice[1] << 8);
+                if (value < 0xfd)
+                    throw new Error('Non-canonical CompactSize (0xfd form for value < 253)');
+            }
+            else if (first === 0xfe) {
+                value = this.readU32();
+                if (value < 0x10000)
+                    throw new Error('Non-canonical CompactSize (0xfe form for value < 0x10000)');
+            }
+            else {
+                const big = this.readU64();
+                if (big < 0x100000000n)
+                    throw new Error('Non-canonical CompactSize (0xff form for value < 2^32)');
+                if (big > BigInt(MAX_SIZE))
+                    throw new Error(`CompactSize exceeds MAX_SIZE: ${big}`);
+                value = Number(big);
+            }
+            if (value > MAX_SIZE) {
+                throw new Error(`CompactSize exceeds MAX_SIZE: ${value}`);
+            }
+            return value;
+        }
+        /** Read a length prefix that must fit in the remaining bytes at `bytesPerItem`. */
+        readCount(bytesPerItem, label) {
+            const count = this.readCompactSize();
+            if (count * bytesPerItem > this.bytes.length - this.offset) {
+                throw new Error(`Declared ${label} count ${count} does not fit in the remaining ` +
+                    `${this.bytes.length - this.offset} byte(s)`);
+            }
+            return count;
+        }
+        get finished() {
+            return this.offset === this.bytes.length;
+        }
+        get position() {
+            return this.offset;
+        }
+    }
+    function readOutpoint(reader) {
+        const txid = bytesToHex(reverseBytes(reader.readBytes(32)));
+        const vout = reader.readU32();
+        return { txid, vout };
+    }
+    function readInput(reader) {
+        const { txid, vout } = readOutpoint(reader);
+        const scriptLength = reader.readCount(1, 'scriptSig');
+        const scriptSigHex = bytesToHex(reader.readBytes(scriptLength));
+        const sequence = reader.readU32();
+        return { txid, vout, scriptSigHex, sequence };
+    }
+    function readOutput(reader) {
+        const valueSats = reader.readU64();
+        const scriptLength = reader.readCount(1, 'scriptPubKey');
+        const scriptPubKeyHex = bytesToHex(reader.readBytes(scriptLength));
+        return { valueSats, scriptPubKeyHex };
+    }
+    // Minimum serialized size per item, used only to bound counts before reading:
+    // input = outpoint(36) + compactSize(1) + sequence(4); output = value(8) +
+    // compactSize(1); witness element = compactSize(1).
+    const MIN_INPUT_SIZE = 41;
+    const MIN_OUTPUT_SIZE = 9;
+    function parseTransaction(hex) {
+        const reader = new ByteReader(hexToBytes(ensureHex(hex, 'transaction hex')));
+        // nVersion is a signed int32 (negative versions exist on-chain historically).
+        const version = reader.readU32() | 0;
+        const inputs = [];
+        const outputs = [];
+        let flags = 0;
+        const vinCount = reader.readCount(MIN_INPUT_SIZE, 'input');
+        if (vinCount === 0) {
+            // Either a dummy marker for the extended (witness) format, or a genuinely
+            // empty vin. Mirrors UnserializeTransaction: a flags byte follows; when it
+            // is non-zero the real vin/vout follow, when zero the vout is NOT read.
+            flags = reader.readU8();
+            if (flags !== 0) {
+                const realVinCount = reader.readCount(MIN_INPUT_SIZE, 'input');
+                for (let i = 0; i < realVinCount; i += 1)
+                    inputs.push(readInput(reader));
+                const voutCount = reader.readCount(MIN_OUTPUT_SIZE, 'output');
+                for (let i = 0; i < voutCount; i += 1)
+                    outputs.push(readOutput(reader));
+            }
+        }
+        else {
+            for (let i = 0; i < vinCount; i += 1)
+                inputs.push(readInput(reader));
+            const voutCount = reader.readCount(MIN_OUTPUT_SIZE, 'output');
+            for (let i = 0; i < voutCount; i += 1)
+                outputs.push(readOutput(reader));
+        }
+        // NIP-014: vrefin sits between vout and witness, v3 only (even when empty).
+        const vrefin = [];
+        if (version === 3) {
+            const refCount = reader.readCount(36, 'refinput');
+            for (let i = 0; i < refCount; i += 1)
+                vrefin.push(readOutpoint(reader));
+        }
+        if (flags & 1) {
+            flags ^= 1;
+            for (const input of inputs) {
+                const stackSize = reader.readCount(1, 'witness element');
+                const stack = [];
+                for (let i = 0; i < stackSize; i += 1) {
+                    const elementLength = reader.readCount(1, 'witness bytes');
+                    stack.push(bytesToHex(reader.readBytes(elementLength)));
+                }
+                input.witness = stack;
+            }
+        }
+        if (flags) {
+            throw new Error(`Unknown transaction optional data (flags 0x${flags.toString(16)})`);
+        }
+        const locktime = reader.readU32();
+        if (!reader.finished) {
+            throw new Error(`Trailing bytes after transaction (offset ${reader.position})`);
+        }
+        return { version, inputs, outputs, vrefin, locktime };
+    }
 
     /**
      * Address helpers. Wraps `decodeAddress` from
@@ -1975,8 +2239,8 @@ var NeuraiScriptsBundle = (function (exports) {
      * missing OP_DROP after payload, bad magic, unsupported pushdata width).
      */
     function splitAssetWrappedScriptPubKey(spkHex) {
-        const normalized = ensureHex(spkHex, 'scriptPubKey');
-        const bytes = hexToBytes(normalized);
+        const normalized = ensureHex$1(spkHex, 'scriptPubKey');
+        const bytes = hexToBytes$1(normalized);
         const assetOpAt = findTopLevelAssetOpcode(bytes);
         if (assetOpAt < 0) {
             return { prefixHex: normalized, assetTransfer: null };
@@ -1994,12 +2258,12 @@ var NeuraiScriptsBundle = (function (exports) {
         }
         const { assetName, amountRaw, marker } = parseAssetTransferPayload(payload);
         return {
-            prefixHex: bytesToHex(prefix),
+            prefixHex: bytesToHex$1(prefix),
             assetTransfer: {
                 assetName,
                 amountRaw,
                 marker,
-                payloadHex: bytesToHex(payload),
+                payloadHex: bytesToHex$1(payload),
             },
         };
     }
@@ -2261,7 +2525,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * `OP_TXHASH(0x0080)` evaluated at input 0:
      * `SHA256(tag || tag || 80 00 || 00 00 00 00)` with `tag = SHA256("NeuraiTxHash")`.
      */
-    const INPUT_ZERO_TXHASH = hexToBytes('419632cabaf8bb70b96a8c92c4601a9c2ba11e96841daebc9d98f4835eeb0e36');
+    const INPUT_ZERO_TXHASH = hexToBytes$1('419632cabaf8bb70b96a8c92c4601a9c2ba11e96841daebc9d98f4835eeb0e36');
     function appendPaymentAndBuyerChecks(b, p) {
         // output[0].value >= N * unitPriceSats                      [ N ]
         b.op(OP_DUP)
@@ -2554,7 +2818,7 @@ var NeuraiScriptsBundle = (function (exports) {
     }
     /** Hex convenience wrapper for `buildPartialFillScript`. */
     function buildPartialFillScriptHex(params) {
-        return bytesToHex(buildPartialFillScript(params));
+        return bytesToHex$1(buildPartialFillScript(params));
     }
 
     /**
@@ -2661,7 +2925,7 @@ var NeuraiScriptsBundle = (function (exports) {
         return b.build();
     }
     function buildPartialFillScriptPQHex(params) {
-        return bytesToHex(buildPartialFillScriptPQ(params));
+        return bytesToHex$1(buildPartialFillScriptPQ(params));
     }
 
     /**
@@ -2718,7 +2982,7 @@ var NeuraiScriptsBundle = (function (exports) {
         return b.build();
     }
     function buildFillScriptSigHex(amount, total) {
-        return bytesToHex(buildFillScriptSig(amount, total));
+        return bytesToHex$1(buildFillScriptSig(amount, total));
     }
     /**
      * Unlock the covenant via the seller's cancel branch.
@@ -2748,7 +3012,7 @@ var NeuraiScriptsBundle = (function (exports) {
             .build();
     }
     function buildCancelScriptSigHex(signatureDer, pubKey) {
-        return bytesToHex(buildCancelScriptSig(signatureDer, pubKey));
+        return bytesToHex$1(buildCancelScriptSig(signatureDer, pubKey));
     }
 
     /**
@@ -2792,7 +3056,7 @@ var NeuraiScriptsBundle = (function (exports) {
             .build();
     }
     function buildCancelScriptSigPQHex(sigPQ, pubKey) {
-        return bytesToHex(buildCancelScriptSigPQ(sigPQ, pubKey));
+        return bytesToHex$1(buildCancelScriptSigPQ(sigPQ, pubKey));
     }
 
     /**
@@ -2894,7 +3158,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * descriptive message if the bytes don't match the partial-fill template.
      */
     function parsePartialFillScript(script, network = 'xna-test') {
-        const bytes = typeof script === 'string' ? hexToBytes(script) : script;
+        const bytes = typeof script === 'string' ? hexToBytes$1(script) : script;
         const c = makeCursor(bytes);
         // ═════ Outer IF — Cancel branch ═════
         expectByte(c, OP_IF, 'OP_IF (outer cancel)');
@@ -2918,7 +3182,7 @@ var NeuraiScriptsBundle = (function (exports) {
             unitPriceSats: fill.unitPriceSats,
             tokenId: fill.tokenId,
             expiration: fill.expiration,
-            scriptHex: bytesToHex(bytes)
+            scriptHex: bytesToHex$1(bytes)
         };
     }
 
@@ -2933,7 +3197,7 @@ var NeuraiScriptsBundle = (function (exports) {
      */
     /** Quick discriminator without throwing — useful for indexers. */
     function isPartialFillScriptPQ(script) {
-        const bytes = typeof script === 'string' ? hexToBytes(script) : script;
+        const bytes = typeof script === 'string' ? hexToBytes$1(script) : script;
         // PQ cancel starts with: OP_IF OP_DUP OP_SHA256
         return (bytes.length > 3 &&
             bytes[0] === OP_IF &&
@@ -2945,7 +3209,7 @@ var NeuraiScriptsBundle = (function (exports) {
      * exact layout produced by `buildPartialFillScriptPQ`.
      */
     function parsePartialFillScriptPQ(script, network = 'xna-test') {
-        const bytes = typeof script === 'string' ? hexToBytes(script) : script;
+        const bytes = typeof script === 'string' ? hexToBytes$1(script) : script;
         const c = makeCursor(bytes);
         // ═════ Outer IF — Cancel branch (PQ) ═════
         expectByte(c, OP_IF, 'OP_IF (outer cancel)');
@@ -2980,14 +3244,843 @@ var NeuraiScriptsBundle = (function (exports) {
             txHashSelector,
             expiration: fill.expiration,
             paymentScriptPubKey: fill.paymentScriptPubKey,
-            scriptHex: bytesToHex(bytes)
+            scriptHex: bytesToHex$1(bytes)
         };
+    }
+
+    /**
+     * NIP-054 P2AH custody policy (`OP_CHECKASSETAUTH`, AuthScript only).
+     *
+     * The policy is the witnessScript of a generic AuthScript v1 (NoAuth)
+     * address. A spend of that address needs M of the N owner-token roles of the
+     * list to approve it (G of them when an owner token held by the custody
+     * leaves it):
+     *
+     *   policy:  <1> <M> <G> <role_1> ... <role_n> <n> OP_CHECKASSETAUTH
+     *   witness: [0x00, <c>, <a>, <b>, <T>, policy]
+     *
+     * Build the four arguments with `buildAssetAuthArgs` and wrap them with
+     * `buildAuthScriptWitnessNoAuth({ args, witnessScript: policy })`. A role
+     * approves either by spending its owner token from P2PKH or a strict
+     * AuthScript address with a SIGHASH_ALL signature (synchronous spend, every
+     * argument 0), or by a vote (see `vote.ts` and `proposal.ts`).
+     */
+    /** The only policy version defined by NIP-054. */
+    const ASSETAUTH_POLICY_VERSION = 1;
+    /** Highest number of roles in one policy. */
+    const ASSETAUTH_MAX_ROLES = 16;
+    /** c, a, b and T are script numbers of at most 4 bytes. */
+    const MAX_ARGUMENT = 0x7fffffff;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    function compareBytes(x, y) {
+        const n = Math.min(x.length, y.length);
+        for (let i = 0; i < n; i += 1) {
+            if (x[i] !== y[i])
+                return x[i] - y[i];
+        }
+        return x.length - y.length;
+    }
+    /** Role names as the node checks them: sorted by bytes, no duplicates. */
+    function sortedRoles(roles) {
+        if (!Array.isArray(roles) || roles.length < 1 || roles.length > ASSETAUTH_MAX_ROLES) {
+            throw new Error(`roles must list 1 to ${ASSETAUTH_MAX_ROLES} owner tokens`);
+        }
+        const names = roles.map((role) => {
+            if (typeof role !== 'string' || !role.endsWith('!')) {
+                throw new Error(`role ${JSON.stringify(role)} is not an owner token name (NAME!)`);
+            }
+            return encoder.encode(role);
+        });
+        names.sort(compareBytes);
+        for (let i = 1; i < names.length; i += 1) {
+            if (compareBytes(names[i - 1], names[i]) === 0) {
+                throw new Error(`role ${decoder.decode(names[i])} is listed twice`);
+            }
+        }
+        return names;
+    }
+    function assertThresholds(M, G, n) {
+        if (!Number.isInteger(M) || !Number.isInteger(G) || M < 1 || M > G || G > n) {
+            throw new Error(`thresholds must satisfy 1 <= M <= G <= ${n} (got M=${M}, G=${G})`);
+        }
+    }
+    function buildAssetAuthPolicyScript(policy) {
+        const roles = sortedRoles(policy.roles);
+        assertThresholds(policy.M, policy.G, roles.length);
+        const b = new ScriptBuilder()
+            .pushInt(ASSETAUTH_POLICY_VERSION)
+            .pushInt(policy.M)
+            .pushInt(policy.G);
+        for (const role of roles)
+            b.pushBytes(role);
+        return b.pushInt(roles.length).op(OP_CHECKASSETAUTH).build();
+    }
+    /** Inverse of `buildAssetAuthPolicyScript`; rejects any other script. */
+    function parseAssetAuthPolicyScript(script) {
+        const end = script.length - 2;
+        const nOp = script[end];
+        if (script.length < 6 || script[end + 1] !== OP_CHECKASSETAUTH || nOp < OP_1 || nOp > OP_16) {
+            throw new Error('parse: not an OP_CHECKASSETAUTH policy script');
+        }
+        const c = makeCursor(script);
+        if (readPushUint8(c, 'version') !== ASSETAUTH_POLICY_VERSION) {
+            throw new Error(`parse: policy version must be ${ASSETAUTH_POLICY_VERSION}`);
+        }
+        const M = readPushUint8(c, 'M');
+        const G = readPushUint8(c, 'G');
+        const names = [];
+        while (c.pos < end)
+            names.push(readPush(c, `role ${names.length + 1}`));
+        if (c.pos !== end || names.length !== nOp - OP_1 + 1) {
+            throw new Error('parse: role count does not match n');
+        }
+        const roles = names.map((name) => decoder.decode(name));
+        const policy = { M, G, roles };
+        // Strictly increasing as written: a re-sorted list would be another script.
+        const rebuilt = buildAssetAuthPolicyScript(policy);
+        if (compareBytes(rebuilt, script) !== 0) {
+            throw new Error('parse: roles are not owner names in strictly increasing byte order');
+        }
+        return policy;
+    }
+    /**
+     * Witness `args` [<c>, <a>, <b>, <T>] for the custody input: minimal script
+     * numbers, 0 as the empty element. All default to 0, the synchronous spend.
+     */
+    function buildAssetAuthArgs({ c = 0, a = 0, b = 0, T = 0 } = {}) {
+        for (const [name, value] of Object.entries({ c, a, b, T })) {
+            if (!Number.isInteger(value) || value < 0 || value > MAX_ARGUMENT) {
+                throw new Error(`${name} must be an integer from 0 to ${MAX_ARGUMENT}`);
+            }
+        }
+        return [c, a, b, T].map((value) => encodeScriptNum(value));
+    }
+
+    // Split a JS number into u32 halves without a BigInt allocation. Exact only for integers
+    // `0 <= n < 2**53`; callers use it on byte / bit counters, which JS length math caps far below
+    // that (an ArrayBuffer cannot exceed 2**53 - 1 bytes).
+    const fromNumH = (n) => (n / 2 ** 32) | 0;
+    const fromNumL = (n) => n >>> 0;
+    // Drop-in replacement for `view.setBigUint64(byteOffset, BigInt(n), isLE)` without the per-call
+    // BigInt allocation. Same `n < 2**53` precondition as `fromNumH`/`fromNumL`.
+    function setU64FromNum(view, byteOffset, n, isLE) {
+        const h = fromNumH(n);
+        const l = fromNumL(n);
+        view.setUint32(byteOffset, isLE ? l : h, isLE);
+        view.setUint32(byteOffset + 4, isLE ? h : l, isLE);
+    }
+
+    /**
+     * Checks if something is Uint8Array. Be careful: nodejs Buffer will return true.
+     * @param a - value to test
+     * @returns `true` when the value is a Uint8Array-compatible view.
+     * @example
+     * Check whether a value is a Uint8Array-compatible view.
+     * ```ts
+     * isBytes(new Uint8Array([1, 2, 3]));
+     * ```
+     */
+    function isBytes(a) {
+        // Plain `instanceof Uint8Array` is too strict for some Buffer / proxy / cross-realm cases.
+        // The fallback still requires a real ArrayBuffer view, so plain
+        // JSON-deserialized `{ constructor: ... }` spoofing is rejected, and
+        // `BYTES_PER_ELEMENT === 1` keeps the fallback on byte-oriented views.
+        return (a instanceof Uint8Array ||
+            (ArrayBuffer.isView(a) &&
+                a.constructor.name === 'Uint8Array' &&
+                'BYTES_PER_ELEMENT' in a &&
+                a.BYTES_PER_ELEMENT === 1));
+    }
+    // Shared error-message prefix builder. Only called on throw paths, so assert
+    // success paths never pay for the string concatenation.
+    const atitle = (title) => (title ? `"${title}" ` : '');
+    /**
+     * Asserts something is Uint8Array.
+     * @param value - value to validate
+     * @param length - optional exact length constraint
+     * @param title - label included in thrown errors
+     * @returns The validated byte array.
+     * @throws On wrong argument types. {@link TypeError}
+     * @throws On wrong argument ranges or values. {@link RangeError}
+     * @example
+     * Validate that a value is a byte array.
+     * ```ts
+     * abytes(new Uint8Array([1, 2, 3]));
+     * ```
+     */
+    function abytes(value, length, title = '') {
+        // Success path first: this runs at the start of every update() / digestInto(), and the
+        // common `abytes(data)` form must not pay for length handling it does not use.
+        if (isBytes(value) && (length === undefined))
+            return value;
+        const bytes = isBytes(value);
+        const ofLen = '';
+        const got = bytes ? `length=${value.length}` : `type=${typeof value}`;
+        const message = atitle(title) + 'expected Uint8Array' + ofLen + ', got ' + got;
+        if (!bytes)
+            throw new TypeError(message);
+        throw new RangeError(message);
+    }
+    const aobject = (value, label) => {
+        if (value === null || typeof value !== 'object' || Array.isArray(value))
+            throw new TypeError((label === 'object' ? '' : `"${label}" `) + 'expected object, got type=' + typeof value);
+    };
+    const aopts = (value, label) => {
+        aobject(value, label);
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null)
+            throw new TypeError(`"${label}" expected plain object`);
+        // Object.assign() treats an own "__proto__" source key as a write to the target's legacy
+        // prototype setter. Reject it before merging so inherited option values cannot be injected.
+        if (Object.hasOwn(value, '__proto__'))
+            throw new TypeError(`"${label}.__proto__" is not allowed`);
+    };
+    /**
+     * Asserts a hash instance has not been destroyed or finished.
+     * @param instance - hash instance to validate
+     * @param checkFinished - whether to reject finalized instances
+     * @throws If the hash instance has already been destroyed or finalized. {@link Error}
+     * @example
+     * Validate that a hash instance is still usable.
+     * ```ts
+     * import { aexists } from '@noble/hashes/utils.js';
+     * import { sha256 } from '@noble/hashes/sha2.js';
+     * const hash = sha256.create();
+     * aexists(hash);
+     * ```
+     */
+    function aexists(instance, checkFinished = true) {
+        // Runs on every update()/digestInto(); the flags are library-owned booleans, so only their
+        // truthiness is checked - re-validating their type per call was pure hot-path overhead.
+        if (instance.destroyed)
+            throw new Error('hash was destroyed');
+        if (checkFinished && instance.finished)
+            throw new Error('digest() was already called');
+    }
+    /**
+     * Asserts output is a sufficiently-sized byte array.
+     * @param out - destination buffer
+     * @param instance - hash instance providing output length
+     * Oversized buffers are allowed; downstream code only promises to fill the first `outputLen` bytes.
+     * @throws On wrong argument types. {@link TypeError}
+     * @throws On wrong argument ranges or values. {@link RangeError}
+     * @example
+     * Validate a caller-provided digest buffer.
+     * ```ts
+     * import { aoutput } from '@noble/hashes/utils.js';
+     * import { sha256 } from '@noble/hashes/sha2.js';
+     * const hash = sha256.create();
+     * aoutput(new Uint8Array(hash.outputLen), hash);
+     * ```
+     */
+    function aoutput(out, instance) {
+        abytes(out, undefined, 'output');
+        // `outputLen` is a library-owned readonly number; the negated comparison keeps failing fast
+        // when it is missing/NaN (comparisons with undefined/NaN are false) without an anumber() call.
+        const min = instance.outputLen;
+        if (!(out.length >= min)) {
+            throw new RangeError('"output" expected length >= ' + min);
+        }
+    }
+    /**
+     * Zeroizes typed arrays in place. Warning: JS provides no guarantees.
+     * @param arrays - arrays to overwrite with zeros
+     * @example
+     * Zeroize sensitive buffers in place.
+     * ```ts
+     * clean(new Uint8Array([1, 2, 3]));
+     * ```
+     */
+    function clean(...arrays) {
+        for (let i = 0; i < arrays.length; i++) {
+            arrays[i].fill(0);
+        }
+    }
+    /**
+     * Creates a DataView for byte-level manipulation.
+     * @param arr - source typed array
+     * @returns DataView over the same buffer region.
+     * @example
+     * Create a DataView over an existing buffer.
+     * ```ts
+     * createView(new Uint8Array(4));
+     * ```
+     */
+    function createView(arr) {
+        return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
+    }
+    /**
+     * Rotate-right operation for uint32 values.
+     * @param word - source word
+     * @param shift - shift amount in bits
+     * @returns Rotated word.
+     * @example
+     * Rotate a 32-bit word to the right.
+     * ```ts
+     * rotr(0x12345678, 8);
+     * ```
+     */
+    function rotr(word, shift) {
+        return (word << (32 - shift)) | (word >>> shift);
+    }
+    /**
+     * Merges default options and passed options.
+     * @param defaults - base option object
+     * @param opts - user overrides
+     * @param title - label included in thrown override errors
+     * @returns Fresh merged option object with a null prototype.
+     * @throws On wrong argument types. {@link TypeError}
+     * @example
+     * Merge user overrides onto default options.
+     * ```ts
+     * checkOpts({ dkLen: 32 }, { asyncTick: 10 });
+     * ```
+     */
+    function checkOpts(defaults, opts, title = 'opts') {
+        aopts(defaults, 'defaults');
+        if (opts !== undefined)
+            aopts(opts, title);
+        // Callers read optional fields directly, so omitted values must not fall through to ambient
+        // Object.prototype pollution (for example a forged `dkLen` changing SHAKE's default output).
+        const merged = Object.assign(Object.create(null), defaults, opts);
+        return merged;
+    }
+    /**
+     * Creates a callable hash function from a stateful class constructor.
+     * @param hashCons - hash constructor or factory
+     * @param info - optional metadata such as DER OID
+     * @returns Frozen callable hash wrapper with `.create()`.
+     *   Wrapper construction eagerly calls `hashCons(undefined)` once to read
+     *   `outputLen` / `blockLen`, so constructor side effects happen at module
+     *   init time.
+     * @throws On wrong argument types. {@link TypeError}
+     * @example
+     * Wrap a stateful hash constructor into a callable helper.
+     * ```ts
+     * import { createHasher } from '@noble/hashes/utils.js';
+     * import { sha256 } from '@noble/hashes/sha2.js';
+     * const wrapped = createHasher(sha256.create, { oid: sha256.oid });
+     * wrapped(new Uint8Array([1]));
+     * ```
+     */
+    function createHasher(hashCons, info = {}) {
+        if (typeof hashCons !== 'function')
+            throw new TypeError('"hashCons" expected function, got type=' + typeof hashCons);
+        info = checkOpts({}, info, 'info');
+        const hashC = (msg, opts) => hashCons(opts)
+            .update(msg)
+            .digest();
+        const tmp = hashCons(undefined);
+        hashC.outputLen = tmp.outputLen;
+        hashC.blockLen = tmp.blockLen;
+        hashC.canXOF = tmp.canXOF;
+        hashC.create = (opts) => hashCons(opts);
+        Object.assign(hashC, info);
+        return Object.freeze(hashC);
+    }
+    /**
+     * Creates OID metadata for NIST hashes with prefix `06 09 60 86 48 01 65 03 04 02`.
+     * @param suffix - final OID byte for the selected hash.
+     *   The helper accepts any byte even though only the documented NIST hash
+     *   suffixes are meaningful downstream.
+     * @returns Object containing the DER-encoded OID.
+     * @example
+     * Build OID metadata for a NIST hash.
+     * ```ts
+     * oidNist(0x01);
+     * ```
+     */
+    const oidNist = (suffix) => ({
+        // Current NIST hashAlgs suffixes used here fit in one DER subidentifier octet.
+        // Larger suffix values would need base-128 OID encoding and a different length byte.
+        oid: Uint8Array.from([0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, suffix]),
+    });
+
+    /**
+     * Internal Merkle-Damgard hash utils.
+     * @module
+     */
+    /**
+     * Shared 32-bit conditional boolean primitive reused by SHA-256, SHA-1, and MD5 `F`.
+     * Returns bits from `b` when `a` is set, otherwise from `c`.
+     * The XOR form is equivalent to MD5's `F(X,Y,Z) = XY v not(X)Z` because the masked terms never
+     * set the same bit.
+     * @param a - selector word
+     * @param b - word chosen when selector bit is set
+     * @param c - word chosen when selector bit is clear
+     * @returns Mixed 32-bit word.
+     * @example
+     * Combine three words with the shared 32-bit choice primitive.
+     * ```ts
+     * Chi(0xffffffff, 0x12345678, 0x87654321);
+     * ```
+     */
+    function Chi(a, b, c) {
+        return (a & b) ^ (~a & c);
+    }
+    /**
+     * Shared 32-bit majority primitive reused by SHA-256 and SHA-1.
+     * Returns bits shared by at least two inputs.
+     * @param a - first input word
+     * @param b - second input word
+     * @param c - third input word
+     * @returns Mixed 32-bit word.
+     * @example
+     * Combine three words with the shared 32-bit majority primitive.
+     * ```ts
+     * Maj(0xffffffff, 0x12345678, 0x87654321);
+     * ```
+     */
+    function Maj(a, b, c) {
+        return (a & b) ^ (a & c) ^ (b & c);
+    }
+    /**
+     * Merkle-Damgard hash construction base class.
+     * Could be used to create MD5, RIPEMD, SHA1, SHA2.
+     * Accepts only byte-aligned `Uint8Array` input, even when the underlying spec describes bit
+     * strings with partial-byte tails.
+     * @param blockLen - internal block size in bytes
+     * @param outputLen - digest size in bytes
+     * @param padOffset - trailing length field size in bytes
+     * @param isLE - whether length and state words are encoded in little-endian
+     * @example
+     * Use a concrete subclass to get the shared Merkle-Damgard update/digest flow.
+     * ```ts
+     * import { _SHA1 } from '@noble/hashes/legacy.js';
+     * const hash = new _SHA1();
+     * hash.update(new Uint8Array([97, 98, 99]));
+     * hash.digest();
+     * ```
+     */
+    class HashMD {
+        blockLen;
+        outputLen;
+        canXOF = false;
+        padOffset;
+        isLE;
+        // For partial updates less than block size
+        buffer;
+        view;
+        finished = false;
+        length = 0;
+        pos = 0;
+        destroyed = false;
+        constructor(blockLen, outputLen, padOffset, isLE) {
+            this.blockLen = blockLen;
+            this.outputLen = outputLen;
+            this.padOffset = padOffset;
+            this.isLE = isLE;
+            this.buffer = new Uint8Array(blockLen);
+            this.view = createView(this.buffer);
+        }
+        update(data) {
+            aexists(this);
+            abytes(data);
+            const { view, buffer, blockLen } = this;
+            const len = data.length;
+            let processed = false;
+            for (let pos = 0; pos < len;) {
+                const take = Math.min(blockLen - this.pos, len - pos);
+                // Fast path only when there is no buffered partial block: `take === blockLen` implies
+                // `this.pos === 0`, so we can process full blocks directly from the input view.
+                if (take === blockLen) {
+                    const dataView = createView(data);
+                    for (; blockLen <= len - pos; pos += blockLen)
+                        this.process(dataView, pos);
+                    processed = true;
+                    continue;
+                }
+                // When the whole input is buffered in one go (common for short messages), passing `data`
+                // directly avoids allocating a subarray view.
+                buffer.set(pos === 0 && take === len ? data : data.subarray(pos, pos + take), this.pos);
+                this.pos += take;
+                pos += take;
+                if (this.pos === blockLen) {
+                    this.process(view, 0);
+                    this.pos = 0;
+                    processed = true;
+                }
+            }
+            this.length += data.length;
+            // Shared schedule buffers only pick up input-derived words inside process(); if everything
+            // was buffered without processing, there is nothing to zero.
+            if (processed)
+                this.roundClean();
+            return this;
+        }
+        digestInto(out) {
+            aexists(this);
+            aoutput(out, this);
+            this.finished = true;
+            // Padding
+            // We can avoid allocation of buffer for padding completely if it
+            // was previously not allocated here. But it won't change performance.
+            const { buffer, view, blockLen, isLE } = this;
+            let { pos } = this;
+            // append the bit '1' to the message, then zero-pad the rest of the block
+            buffer[pos++] = 0b10000000;
+            buffer.fill(0, pos);
+            // we have less than padOffset left in buffer, so we cannot put length in
+            // current block, need process it and pad again
+            if (this.padOffset > blockLen - pos) {
+                this.process(view, 0);
+                buffer.fill(0);
+            }
+            // `padOffset` reserves the whole length field. For SHA-384/512 the high 64 bits stay zero from
+            // the padding fill above, and JS will overflow before user input can make that half non-zero.
+            // So we only need to write the low 64 bits here (`length * 8` only scales the exponent of an
+            // integer below 2**53, so the split inside the helper stays exact).
+            setU64FromNum(view, blockLen - 8, this.length * 8, isLE);
+            this.process(view, 0);
+            // The final block above is processed outside update(), so the shared message-schedule
+            // buffers (e.g. SHA256_W) would otherwise retain input-derived words after digest().
+            this.roundClean();
+            // digest() passes our own `buffer` as `out`; reuse its cached view instead of allocating one.
+            const oview = out === buffer ? view : createView(out);
+            const len = this.outputLen;
+            // NOTE: we do division by 4 later, which must be fused in single op with modulo by JIT
+            const outLen = len / 4;
+            const state = this.get();
+            // Subclass-misconfiguration invariant: outputLen must be 32-bit aligned and fit the state.
+            if (len % 4 || outLen > state.length)
+                throw new Error('invalid outputLen');
+            for (let i = 0; i < outLen; i++)
+                oview.setUint32(4 * i, state[i], isLE);
+        }
+        digest() {
+            const { buffer, outputLen } = this;
+            this.digestInto(buffer);
+            // Copy before destroy(): subclasses wipe `buffer` during cleanup, but `digest()` must return
+            // fresh bytes to the caller.
+            const res = buffer.slice(0, outputLen);
+            this.destroy();
+            return res;
+        }
+        _cloneIntoMeta(to) {
+            const { buffer, length, finished, destroyed, pos } = this;
+            to.destroyed = destroyed;
+            to.finished = finished;
+            to.length = length;
+            to.pos = pos;
+            // Only partial-block bytes need copying: when `length % blockLen === 0`, `pos === 0` and
+            // later `update()` / `digestInto()` overwrite `to.buffer` from the start before reading it.
+            if (pos)
+                to.buffer.set(buffer); // Avoid a hot modulo guard.
+            return to;
+        }
+        clone() {
+            return this._cloneInto();
+        }
+    }
+    /**
+     * Initial SHA-2 state: fractional parts of square roots of first 16 primes 2..53.
+     * Check out `test/misc/sha2-gen-iv.js` for recomputation guide.
+     */
+    /** Initial SHA256 state from RFC 6234 §6.1: the first 32 bits of the fractional parts of the
+     * square roots of the first eight prime numbers. Exported as a shared table; callers must treat
+     * it as read-only because constructors copy words from it by index. */
+    const SHA256_IV = /* @__PURE__ */ Uint32Array.from([
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ]);
+
+    /**
+     * SHA2 hash function. A.k.a. sha256, sha384, sha512, sha512_224, sha512_256.
+     * SHA256 is the fastest hash implementable in JS, even faster than Blake3.
+     * Check out {@link https://www.rfc-editor.org/rfc/rfc4634 | RFC 4634} and
+     * {@link https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf | FIPS 180-4}.
+     * @module
+     */
+    /**
+     * SHA-224 / SHA-256 round constants from RFC 6234 §5.1: the first 32 bits
+     * of the cube roots of the first 64 primes (2..311).
+     */
+    // prettier-ignore
+    const SHA256_K = /* @__PURE__ */ Uint32Array.from([
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ]);
+    /** Reusable SHA-224 / SHA-256 message schedule buffer `W_t` from RFC 6234 §6.2 step 1. */
+    const SHA256_W = /* @__PURE__ */ new Uint32Array(64);
+    /** Internal SHA-224 / SHA-256 compression engine from RFC 6234 §6.2. */
+    class SHA2_32B extends HashMD {
+        // We cannot use array here since array allows indexing by variable
+        // which means optimizer/compiler cannot use registers.
+        // Numeric initializers matter: starting the fields as `undefined` changes
+        // V8's field representation and makes sha256 3x slower (measured).
+        A = 0;
+        B = 0;
+        C = 0;
+        D = 0;
+        E = 0;
+        F = 0;
+        G = 0;
+        H = 0;
+        constructor(outputLen, IV) {
+            super(64, outputLen, 8, false);
+            this.A = IV[0] | 0;
+            this.B = IV[1] | 0;
+            this.C = IV[2] | 0;
+            this.D = IV[3] | 0;
+            this.E = IV[4] | 0;
+            this.F = IV[5] | 0;
+            this.G = IV[6] | 0;
+            this.H = IV[7] | 0;
+        }
+        get() {
+            const { A, B, C, D, E, F, G, H } = this;
+            return [A, B, C, D, E, F, G, H];
+        }
+        // prettier-ignore
+        set(A, B, C, D, E, F, G, H) {
+            this.A = A | 0;
+            this.B = B | 0;
+            this.C = C | 0;
+            this.D = D | 0;
+            this.E = E | 0;
+            this.F = F | 0;
+            this.G = G | 0;
+            this.H = H | 0;
+        }
+        _cloneInto(to) {
+            (to ||= new this.constructor()).set(...this.get());
+            return this._cloneIntoMeta(to);
+        }
+        process(view, offset) {
+            // Extend the first 16 words into the remaining 48 words w[16..63] of the message schedule array
+            for (let i = 0; i < 16; i++, offset += 4)
+                SHA256_W[i] = view.getUint32(offset, false);
+            for (let i = 16; i < 64; i++) {
+                const W15 = SHA256_W[i - 15];
+                const W2 = SHA256_W[i - 2];
+                const s0 = rotr(W15, 7) ^ rotr(W15, 18) ^ (W15 >>> 3);
+                const s1 = rotr(W2, 17) ^ rotr(W2, 19) ^ (W2 >>> 10);
+                SHA256_W[i] = (s1 + SHA256_W[i - 7] + s0 + SHA256_W[i - 16]) | 0;
+            }
+            // Compression function main loop, 64 rounds
+            let { A, B, C, D, E, F, G, H } = this;
+            for (let i = 0; i < 64; i++) {
+                const sigma1 = rotr(E, 6) ^ rotr(E, 11) ^ rotr(E, 25);
+                const T1 = (H + sigma1 + Chi(E, F, G) + SHA256_K[i] + SHA256_W[i]) | 0;
+                const sigma0 = rotr(A, 2) ^ rotr(A, 13) ^ rotr(A, 22);
+                const T2 = (sigma0 + Maj(A, B, C)) | 0;
+                H = G;
+                G = F;
+                F = E;
+                E = (D + T1) | 0;
+                D = C;
+                C = B;
+                B = A;
+                A = (T1 + T2) | 0;
+            }
+            // Add the compressed chunk to the current hash value
+            A = (A + this.A) | 0;
+            B = (B + this.B) | 0;
+            C = (C + this.C) | 0;
+            D = (D + this.D) | 0;
+            E = (E + this.E) | 0;
+            F = (F + this.F) | 0;
+            G = (G + this.G) | 0;
+            H = (H + this.H) | 0;
+            this.set(A, B, C, D, E, F, G, H);
+        }
+        roundClean() {
+            clean(SHA256_W);
+        }
+        destroy() {
+            // HashMD callers route post-destroy usability through `destroyed`; zeroizing alone still leaves
+            // update()/digest() callable on reused instances.
+            this.destroyed = true;
+            this.set(0, 0, 0, 0, 0, 0, 0, 0);
+            clean(this.buffer);
+        }
+    }
+    /** Internal SHA-256 hash class grounded in RFC 6234 §6.2. */
+    class _SHA256 extends SHA2_32B {
+        constructor() {
+            super(32, SHA256_IV);
+        }
+    }
+    /**
+     * SHA2-256 hash function from RFC 4634. In JS it's the fastest: even faster than Blake3. Some info:
+     *
+     * - Trying 2^128 hashes would get 50% chance of collision, using birthday attack.
+     * - BTC network is doing 2^70 hashes/sec (2^95 hashes/year) as per 2025.
+     * - Each sha256 hash is executing 2^18 bit operations.
+     * - Good 2024 ASICs can do 200Th/sec with 3500 watts of power, corresponding to 2^36 hashes/joule.
+     * @param msg - message bytes to hash
+     * @param opts - Reserved hash options.
+     * @returns Digest bytes.
+     * @example
+     * Hash a message with SHA2-256.
+     * ```ts
+     * sha256(new Uint8Array([97, 98, 99]));
+     * ```
+     */
+    const sha256 = /* @__PURE__ */ createHasher(() => new _SHA256(), 
+    /* @__PURE__ */ oidNist(0x01));
+
+    /**
+     * NIP-054 proposal hash H, the message a vote carries.
+     *
+     *   H = TaggedHash("NeuraiAssetAuthProposal", m)
+     *   m = chainId (u8) || nVersion (i32) || nLockTime (u32) || T (u32)
+     *       || compact(c) || compact(a) || compact(b)
+     *       || (outpoint, nSequence) of inputs 0..c-1
+     *       || outputs 0..a-1 || the last b outputs
+     *       || compact(#refs) || reference inputs (version 3 only)
+     *
+     * Inputs from index c on and the outputs between the prefix and the suffix
+     * (approvals, returns, fees, change) are left to the executor, so a skeleton
+     * transaction with only the proposal inputs and outputs gives the same H as
+     * the execution. Votes carry H as is, as the 32-byte (64-hex) message of
+     * their owner-token transfer: `bytesToHex(hash)`.
+     */
+    /** The chain identifier the node commits to (OP_CHAINCONTEXT selector 0x03). */
+    const ASSETAUTH_CHAIN_IDS = Object.freeze({
+        mainnet: 0,
+        testnet: 1,
+        regtest: 2
+    });
+    const PROPOSAL_TAG = new TextEncoder().encode('NeuraiAssetAuthProposal');
+    function u32(value) {
+        const out = new Uint8Array(4);
+        new DataView(out.buffer).setUint32(0, value >>> 0, true);
+        return out;
+    }
+    function compactSize(value) {
+        if (value < 0xfd)
+            return Uint8Array.of(value);
+        if (value <= 0xffff)
+            return Uint8Array.of(0xfd, value & 0xff, value >> 8);
+        return concatBytes$1(Uint8Array.of(0xfe), u32(value));
+    }
+    /** A display-order txid and vout as the node serializes a COutPoint. */
+    function outpoint(txid, vout) {
+        return concatBytes$1(hexToBytes$1(txid).reverse(), u32(vout));
+    }
+    function buildAssetAuthProposalMessage(proposal) {
+        const { c, a, b, T } = proposal;
+        const chainId = ASSETAUTH_CHAIN_IDS[proposal.chain];
+        if (chainId === undefined) {
+            throw new Error(`unknown chain ${JSON.stringify(proposal.chain)}`);
+        }
+        for (const [name, value] of Object.entries({ c, a, b, T })) {
+            if (!Number.isInteger(value) || value < 0 || value > 0x7fffffff) {
+                throw new Error(`${name} must be an integer from 0 to ${0x7fffffff}`);
+            }
+        }
+        const tx = parseTransaction(proposal.rawTx);
+        if (c > tx.inputs.length) {
+            throw new Error(`c (${c}) exceeds the ${tx.inputs.length} inputs of the transaction`);
+        }
+        if (a + b > tx.outputs.length) {
+            throw new Error(`a + b (${a + b}) exceeds the ${tx.outputs.length} outputs of the transaction`);
+        }
+        const version = new Uint8Array(4);
+        new DataView(version.buffer).setInt32(0, tx.version, true);
+        const parts = [Uint8Array.of(chainId), version, u32(tx.locktime), u32(T), compactSize(c), compactSize(a), compactSize(b)];
+        for (const input of tx.inputs.slice(0, c)) {
+            parts.push(outpoint(input.txid, input.vout), u32(input.sequence));
+        }
+        for (const output of [...tx.outputs.slice(0, a), ...tx.outputs.slice(tx.outputs.length - b)]) {
+            parts.push(serializeOutput(output));
+        }
+        const refs = tx.version === 3 ? tx.vrefin : [];
+        parts.push(compactSize(refs.length));
+        for (const ref of refs)
+            parts.push(outpoint(ref.txid, ref.vout));
+        return concatBytes$1(...parts);
+    }
+    /** H: 32 bytes, in the order a vote carries it. */
+    function assetAuthProposalHash(proposal) {
+        const tag = sha256(PROPOSAL_TAG);
+        return sha256(concatBytes$1(tag, tag, buildAssetAuthProposalMessage(proposal)));
+    }
+
+    /**
+     * NIP-054 vote lock: a wallet template (not part of the opcode) that holds a
+     * role's owner token while it votes for a proposal.
+     *
+     * The holder sends the owner token, with the proposal hash H as its transfer
+     * message, to the generic AuthScript v1 (NoAuth) address of this script:
+     *
+     *   OP_IF                                     execute, up to height T
+     *     OP_1 OP_CHAINCONTEXT <T> OP_LESSTHANOREQUAL OP_VERIFY
+     *     OP_SWAP OP_4 OP_INPUTFIELD <0x01 || C> OP_EQUALVERIFY
+     *     OP_OUTPUTSCRIPT <return> OP_EQUAL
+     *   OP_ELSE                                   give it back, after T
+     *     OP_1 OP_CHAINCONTEXT <T> OP_GREATERTHAN OP_VERIFY
+     *     OP_NIP OP_OUTPUTSCRIPT <return> OP_EQUAL
+     *   OP_ENDIF
+     *
+     * Both branches send the token back to its owner (`return`, the full output
+     * script). The execute branch also needs the custody, commitment C, at the
+     * input it names. It must use OP_INPUTFIELD selector 04, the full
+     * version-plus-commitment: selector 02 only reads the first 34 bytes of the
+     * spent script, which a forged anyone-can-spend custody can match.
+     */
+    /** OP_INPUTFIELD selector: the full version-plus-commitment of the spent script. */
+    const INPUTFIELD_AUTHSCRIPT_DESTINATION = 0x04;
+    const AUTHSCRIPT_V1 = 0x01;
+    function asBytes(value) {
+        return typeof value === 'string' ? hexToBytes$1(value) : value;
+    }
+    function assertIndex(name, value) {
+        if (!Number.isInteger(value) || value < 0 || value > 0x7fffffff) {
+            throw new Error(`${name} must be an integer from 0 to ${0x7fffffff}`);
+        }
+    }
+    function buildAssetAuthVoteLockScript(params) {
+        assertIndex('T', params.T);
+        const commitment = asBytes(params.custodyCommitment);
+        if (commitment.length !== 32) {
+            throw new Error(`custodyCommitment must be 32 bytes (got ${commitment.length})`);
+        }
+        const returnScript = asBytes(params.returnScriptPubKey);
+        if (returnScript.length === 0) {
+            throw new Error('returnScriptPubKey must not be empty');
+        }
+        return new ScriptBuilder()
+            .op(OP_IF)
+            .pushInt(CHAINCONTEXT_HEIGHT).op(OP_CHAINCONTEXT).pushInt(params.T).op(OP_LESSTHANOREQUAL, OP_VERIFY)
+            .op(OP_SWAP).pushInt(INPUTFIELD_AUTHSCRIPT_DESTINATION).op(OP_INPUTFIELD)
+            .pushBytes(concatBytes$1(Uint8Array.of(AUTHSCRIPT_V1), commitment)).op(OP_EQUALVERIFY)
+            .op(OP_OUTPUTSCRIPT).pushBytes(returnScript).op(OP_EQUAL)
+            .op(OP_ELSE)
+            .pushInt(CHAINCONTEXT_HEIGHT).op(OP_CHAINCONTEXT).pushInt(params.T).op(OP_GREATERTHAN, OP_VERIFY)
+            .op(OP_NIP, OP_OUTPUTSCRIPT).pushBytes(returnScript).op(OP_EQUAL)
+            .op(OP_ENDIF)
+            .build();
+    }
+    /**
+     * Witness `args` of the execute branch: the index of the custody input and
+     * the index of the output that returns the token.
+     */
+    function buildAssetAuthVoteExecuteArgs(params) {
+        assertIndex('custodyInput', params.custodyInput);
+        assertIndex('returnOutput', params.returnOutput);
+        return [encodeScriptNum(params.custodyInput), encodeScriptNum(params.returnOutput), encodeScriptNum(1)];
+    }
+    /** Witness `args` of the return branch, after T. */
+    function buildAssetAuthVoteReturnArgs(params) {
+        assertIndex('returnOutput', params.returnOutput);
+        return [encodeScriptNum(0), encodeScriptNum(params.returnOutput), encodeScriptNum(0)];
     }
 
     // ---------- Core primitives ----------
 
     var NeuraiScripts = /*#__PURE__*/Object.freeze({
         __proto__: null,
+        ASSETAUTH_CHAIN_IDS: ASSETAUTH_CHAIN_IDS,
+        ASSETAUTH_MAX_ROLES: ASSETAUTH_MAX_ROLES,
+        ASSETAUTH_POLICY_VERSION: ASSETAUTH_POLICY_VERSION,
         AUTHSCRIPT_LEGACY: AUTHSCRIPT_LEGACY,
         AUTHSCRIPT_NOAUTH: AUTHSCRIPT_NOAUTH,
         AUTHSCRIPT_PQ: AUTHSCRIPT_PQ,
@@ -2998,6 +4091,13 @@ var NeuraiScriptsBundle = (function (exports) {
         PQ_PUBKEY_PREFIX: PQ_PUBKEY_PREFIX,
         STRICT_PQ_PUBKEY_LENGTH: STRICT_PQ_PUBKEY_LENGTH,
         ScriptBuilder: ScriptBuilder,
+        assetAuthProposalHash: assetAuthProposalHash,
+        buildAssetAuthArgs: buildAssetAuthArgs,
+        buildAssetAuthPolicyScript: buildAssetAuthPolicyScript,
+        buildAssetAuthProposalMessage: buildAssetAuthProposalMessage,
+        buildAssetAuthVoteExecuteArgs: buildAssetAuthVoteExecuteArgs,
+        buildAssetAuthVoteLockScript: buildAssetAuthVoteLockScript,
+        buildAssetAuthVoteReturnArgs: buildAssetAuthVoteReturnArgs,
         buildAuthScriptWitnessLegacy: buildAuthScriptWitnessLegacy,
         buildAuthScriptWitnessNoAuth: buildAuthScriptWitnessNoAuth,
         buildAuthScriptWitnessPQ: buildAuthScriptWitnessPQ,
@@ -3018,8 +4118,8 @@ var NeuraiScriptsBundle = (function (exports) {
         buildStrictWitnessECDSA: buildStrictWitnessECDSA,
         buildStrictWitnessPQ: buildStrictWitnessPQ,
         bytesEqual: bytesEqual,
-        bytesToHex: bytesToHex,
-        concatBytes: concatBytes,
+        bytesToHex: bytesToHex$1,
+        concatBytes: concatBytes$1,
         encodeAuthScriptScriptPubKey: encodeAuthScriptScriptPubKey,
         encodeMultisigRedeemScript: encodeMultisigRedeemScript,
         encodeMultisigRedeemScriptHex: encodeMultisigRedeemScriptHex,
@@ -3030,10 +4130,11 @@ var NeuraiScriptsBundle = (function (exports) {
         encodeP2WSHScriptPubKey: encodeP2WSHScriptPubKey,
         encodeScriptNum: encodeScriptNum,
         encodeSellerScriptPubKey: encodeSellerScriptPubKey,
-        ensureHex: ensureHex,
-        hexToBytes: hexToBytes,
+        ensureHex: ensureHex$1,
+        hexToBytes: hexToBytes$1,
         isPartialFillScriptPQ: isPartialFillScriptPQ,
         opcodes: opcodes,
+        parseAssetAuthPolicyScript: parseAssetAuthPolicyScript,
         parsePartialFillScript: parsePartialFillScript,
         parsePartialFillScriptPQ: parsePartialFillScriptPQ,
         pushBytes: pushBytes,

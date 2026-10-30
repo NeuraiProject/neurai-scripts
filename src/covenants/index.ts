@@ -20,3 +20,25 @@ export {
   buildCancelWitnessStack,
   buildCancelWitnessStackPQ
 } from './partial-fill/index.js';
+
+export {
+  // P2AH custody (NIP-054 OP_CHECKASSETAUTH)
+  ASSETAUTH_POLICY_VERSION,
+  ASSETAUTH_MAX_ROLES,
+  ASSETAUTH_CHAIN_IDS,
+  buildAssetAuthPolicyScript,
+  parseAssetAuthPolicyScript,
+  buildAssetAuthArgs,
+  buildAssetAuthProposalMessage,
+  assetAuthProposalHash,
+  buildAssetAuthVoteLockScript,
+  buildAssetAuthVoteExecuteArgs,
+  buildAssetAuthVoteReturnArgs
+} from './asset-auth/index.js';
+export type {
+  AssetAuthPolicy,
+  AssetAuthArgs,
+  AssetAuthChain,
+  AssetAuthProposal,
+  AssetAuthVoteLockParams
+} from './asset-auth/index.js';

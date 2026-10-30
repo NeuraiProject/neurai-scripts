@@ -109,6 +109,7 @@ export declare const OP_SHA3_256 = 202;
 export declare const OP_SHA512 = 203;
 export declare const OP_CHECKSIG_ED25519 = 221;
 export declare const OP_CHECKSIGADD = 222;
+export declare const OP_CHECKASSETAUTH = 223;
 export declare const OP_NOP1 = 176;
 export declare const OP_NOP9 = 184;
 export declare const OP_NOP10 = 185;

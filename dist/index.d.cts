@@ -341,6 +341,7 @@ declare const OP_SHA3_256 = 202;
 declare const OP_SHA512 = 203;
 declare const OP_CHECKSIG_ED25519 = 221;
 declare const OP_CHECKSIGADD = 222;
+declare const OP_CHECKASSETAUTH = 223;
 declare const OP_NOP1 = 176;
 declare const OP_NOP9 = 184;
 declare const OP_NOP10 = 185;
@@ -453,6 +454,7 @@ declare const opcodes_d_OP_BOOLAND: typeof OP_BOOLAND;
 declare const opcodes_d_OP_BOOLOR: typeof OP_BOOLOR;
 declare const opcodes_d_OP_CAT: typeof OP_CAT;
 declare const opcodes_d_OP_CHAINCONTEXT: typeof OP_CHAINCONTEXT;
+declare const opcodes_d_OP_CHECKASSETAUTH: typeof OP_CHECKASSETAUTH;
 declare const opcodes_d_OP_CHECKLOCKTIMEVERIFY: typeof OP_CHECKLOCKTIMEVERIFY;
 declare const opcodes_d_OP_CHECKMERKLEINCLUSION: typeof OP_CHECKMERKLEINCLUSION;
 declare const opcodes_d_OP_CHECKMULTISIG: typeof OP_CHECKMULTISIG;
@@ -609,6 +611,7 @@ declare namespace opcodes_d {
     opcodes_d_OP_BOOLOR as OP_BOOLOR,
     opcodes_d_OP_CAT as OP_CAT,
     opcodes_d_OP_CHAINCONTEXT as OP_CHAINCONTEXT,
+    opcodes_d_OP_CHECKASSETAUTH as OP_CHECKASSETAUTH,
     opcodes_d_OP_CHECKLOCKTIMEVERIFY as OP_CHECKLOCKTIMEVERIFY,
     opcodes_d_OP_CHECKMERKLEINCLUSION as OP_CHECKMERKLEINCLUSION,
     opcodes_d_OP_CHECKMULTISIG as OP_CHECKMULTISIG,
@@ -1239,5 +1242,126 @@ declare function isPartialFillScriptPQ(script: Uint8Array | string): boolean;
  */
 declare function parsePartialFillScriptPQ(script: Uint8Array | string, network?: Network): ParsedPartialFillOrderPQ;
 
-export { AUTHSCRIPT_LEGACY, AUTHSCRIPT_NOAUTH, AUTHSCRIPT_PQ, AUTHSCRIPT_REF, DEFAULT_PQ_TXHASH_SELECTOR, MULTISIG_MAX_PUBKEYS, NULLDATA_STANDARD_MAX_SIZE, PQ_PUBKEY_PREFIX, STRICT_PQ_PUBKEY_LENGTH, ScriptBuilder, buildAuthScriptWitnessLegacy, buildAuthScriptWitnessNoAuth, buildAuthScriptWitnessPQ, buildAuthScriptWitnessRef, buildCancelScriptSig, buildCancelScriptSigHex, buildCancelScriptSigPQ, buildCancelScriptSigPQHex, buildCancelWitnessStack, buildCancelWitnessStackPQ, buildFillScriptSig, buildFillScriptSigHex, buildFillWitnessStack, buildPartialFillScript, buildPartialFillScriptHex, buildPartialFillScriptPQ, buildPartialFillScriptPQHex, buildStrictWitnessECDSA, buildStrictWitnessPQ, bytesEqual, bytesToHex, concatBytes, encodeAuthScriptScriptPubKey, encodeMultisigRedeemScript, encodeMultisigRedeemScriptHex, encodeNullDataScript, encodeP2PKHScriptPubKey, encodeP2SHScriptPubKey, encodeP2WPKHScriptPubKey, encodeP2WSHScriptPubKey, encodeScriptNum, encodeSellerScriptPubKey, ensureHex, hexToBytes, isPartialFillScriptPQ, opcodes_d as opcodes, parsePartialFillScript, parsePartialFillScriptPQ, pushBytes, pushHex, pushInt, splitAssetWrappedScriptPubKey };
-export type { AssetMarker, AssetTransferPayload, AuthScriptWitnessLegacyInput, AuthScriptWitnessNoAuthInput, AuthScriptWitnessPQInput, AuthScriptWitnessRefInput, AuthScriptWitnessVersion, AuthType, EncodeNullDataOptions, MultisigParams, Network, OrderUtxo, ParsedPartialFillOrder, ParsedPartialFillOrderPQ, PartialFillExpiration, PartialFillExpirationMode, PartialFillOrderPQParams, PartialFillOrderParams, SellerAddressKind, SellerScriptPubKey, SplitAssetWrappedResult, StrictWitnessECDSAInput, StrictWitnessPQInput, TxInputRef };
+/**
+ * NIP-054 P2AH custody policy (`OP_CHECKASSETAUTH`, AuthScript only).
+ *
+ * The policy is the witnessScript of a generic AuthScript v1 (NoAuth)
+ * address. A spend of that address needs M of the N owner-token roles of the
+ * list to approve it (G of them when an owner token held by the custody
+ * leaves it):
+ *
+ *   policy:  <1> <M> <G> <role_1> ... <role_n> <n> OP_CHECKASSETAUTH
+ *   witness: [0x00, <c>, <a>, <b>, <T>, policy]
+ *
+ * Build the four arguments with `buildAssetAuthArgs` and wrap them with
+ * `buildAuthScriptWitnessNoAuth({ args, witnessScript: policy })`. A role
+ * approves either by spending its owner token from P2PKH or a strict
+ * AuthScript address with a SIGHASH_ALL signature (synchronous spend, every
+ * argument 0), or by a vote (see `vote.ts` and `proposal.ts`).
+ */
+/** The only policy version defined by NIP-054. */
+declare const ASSETAUTH_POLICY_VERSION = 1;
+/** Highest number of roles in one policy. */
+declare const ASSETAUTH_MAX_ROLES = 16;
+interface AssetAuthPolicy {
+    /** Roles that must approve a spend. */
+    M: number;
+    /** Roles that must approve when an owner token held by the custody leaves it (M <= G). */
+    G: number;
+    /** Owner token names (`NAME!`, `&NAME!`). Any order: the script lists them sorted by bytes. */
+    roles: string[];
+}
+interface AssetAuthArgs {
+    /** Proposal inputs: inputs 0..c-1 are committed by the proposal hash. */
+    c: number;
+    /** Proposal output prefix: outputs 0..a-1. */
+    a: number;
+    /** Proposal output suffix: the last b outputs. */
+    b: number;
+    /** Expiry height of the votes. */
+    T: number;
+}
+declare function buildAssetAuthPolicyScript(policy: AssetAuthPolicy): Uint8Array;
+/** Inverse of `buildAssetAuthPolicyScript`; rejects any other script. */
+declare function parseAssetAuthPolicyScript(script: Uint8Array): AssetAuthPolicy;
+/**
+ * Witness `args` [<c>, <a>, <b>, <T>] for the custody input: minimal script
+ * numbers, 0 as the empty element. All default to 0, the synchronous spend.
+ */
+declare function buildAssetAuthArgs({ c, a, b, T }?: Partial<AssetAuthArgs>): Uint8Array[];
+
+/**
+ * NIP-054 proposal hash H, the message a vote carries.
+ *
+ *   H = TaggedHash("NeuraiAssetAuthProposal", m)
+ *   m = chainId (u8) || nVersion (i32) || nLockTime (u32) || T (u32)
+ *       || compact(c) || compact(a) || compact(b)
+ *       || (outpoint, nSequence) of inputs 0..c-1
+ *       || outputs 0..a-1 || the last b outputs
+ *       || compact(#refs) || reference inputs (version 3 only)
+ *
+ * Inputs from index c on and the outputs between the prefix and the suffix
+ * (approvals, returns, fees, change) are left to the executor, so a skeleton
+ * transaction with only the proposal inputs and outputs gives the same H as
+ * the execution. Votes carry H as is, as the 32-byte (64-hex) message of
+ * their owner-token transfer: `bytesToHex(hash)`.
+ */
+
+type AssetAuthChain = 'mainnet' | 'testnet' | 'regtest';
+/** The chain identifier the node commits to (OP_CHAINCONTEXT selector 0x03). */
+declare const ASSETAUTH_CHAIN_IDS: Readonly<Record<AssetAuthChain, number>>;
+interface AssetAuthProposal extends AssetAuthArgs {
+    /** The execution, or a skeleton with its proposal inputs and outputs (hex). */
+    rawTx: string;
+    chain: AssetAuthChain;
+}
+declare function buildAssetAuthProposalMessage(proposal: AssetAuthProposal): Uint8Array;
+/** H: 32 bytes, in the order a vote carries it. */
+declare function assetAuthProposalHash(proposal: AssetAuthProposal): Uint8Array;
+
+/**
+ * NIP-054 vote lock: a wallet template (not part of the opcode) that holds a
+ * role's owner token while it votes for a proposal.
+ *
+ * The holder sends the owner token, with the proposal hash H as its transfer
+ * message, to the generic AuthScript v1 (NoAuth) address of this script:
+ *
+ *   OP_IF                                     execute, up to height T
+ *     OP_1 OP_CHAINCONTEXT <T> OP_LESSTHANOREQUAL OP_VERIFY
+ *     OP_SWAP OP_4 OP_INPUTFIELD <0x01 || C> OP_EQUALVERIFY
+ *     OP_OUTPUTSCRIPT <return> OP_EQUAL
+ *   OP_ELSE                                   give it back, after T
+ *     OP_1 OP_CHAINCONTEXT <T> OP_GREATERTHAN OP_VERIFY
+ *     OP_NIP OP_OUTPUTSCRIPT <return> OP_EQUAL
+ *   OP_ENDIF
+ *
+ * Both branches send the token back to its owner (`return`, the full output
+ * script). The execute branch also needs the custody, commitment C, at the
+ * input it names. It must use OP_INPUTFIELD selector 04, the full
+ * version-plus-commitment: selector 02 only reads the first 34 bytes of the
+ * spent script, which a forged anyone-can-spend custody can match.
+ */
+interface AssetAuthVoteLockParams {
+    /** Expiry height of the proposal the vote is for. */
+    T: number;
+    /** 32-byte AuthScript commitment C of the custody, as in its scriptPubKey `OP_1 <C>` (hex or bytes). */
+    custodyCommitment: string | Uint8Array;
+    /** The output script that gives the owner token back to its holder (hex or bytes). */
+    returnScriptPubKey: string | Uint8Array;
+}
+declare function buildAssetAuthVoteLockScript(params: AssetAuthVoteLockParams): Uint8Array;
+/**
+ * Witness `args` of the execute branch: the index of the custody input and
+ * the index of the output that returns the token.
+ */
+declare function buildAssetAuthVoteExecuteArgs(params: {
+    custodyInput: number;
+    returnOutput: number;
+}): Uint8Array[];
+/** Witness `args` of the return branch, after T. */
+declare function buildAssetAuthVoteReturnArgs(params: {
+    returnOutput: number;
+}): Uint8Array[];
+
+export { ASSETAUTH_CHAIN_IDS, ASSETAUTH_MAX_ROLES, ASSETAUTH_POLICY_VERSION, AUTHSCRIPT_LEGACY, AUTHSCRIPT_NOAUTH, AUTHSCRIPT_PQ, AUTHSCRIPT_REF, DEFAULT_PQ_TXHASH_SELECTOR, MULTISIG_MAX_PUBKEYS, NULLDATA_STANDARD_MAX_SIZE, PQ_PUBKEY_PREFIX, STRICT_PQ_PUBKEY_LENGTH, ScriptBuilder, assetAuthProposalHash, buildAssetAuthArgs, buildAssetAuthPolicyScript, buildAssetAuthProposalMessage, buildAssetAuthVoteExecuteArgs, buildAssetAuthVoteLockScript, buildAssetAuthVoteReturnArgs, buildAuthScriptWitnessLegacy, buildAuthScriptWitnessNoAuth, buildAuthScriptWitnessPQ, buildAuthScriptWitnessRef, buildCancelScriptSig, buildCancelScriptSigHex, buildCancelScriptSigPQ, buildCancelScriptSigPQHex, buildCancelWitnessStack, buildCancelWitnessStackPQ, buildFillScriptSig, buildFillScriptSigHex, buildFillWitnessStack, buildPartialFillScript, buildPartialFillScriptHex, buildPartialFillScriptPQ, buildPartialFillScriptPQHex, buildStrictWitnessECDSA, buildStrictWitnessPQ, bytesEqual, bytesToHex, concatBytes, encodeAuthScriptScriptPubKey, encodeMultisigRedeemScript, encodeMultisigRedeemScriptHex, encodeNullDataScript, encodeP2PKHScriptPubKey, encodeP2SHScriptPubKey, encodeP2WPKHScriptPubKey, encodeP2WSHScriptPubKey, encodeScriptNum, encodeSellerScriptPubKey, ensureHex, hexToBytes, isPartialFillScriptPQ, opcodes_d as opcodes, parseAssetAuthPolicyScript, parsePartialFillScript, parsePartialFillScriptPQ, pushBytes, pushHex, pushInt, splitAssetWrappedScriptPubKey };
+export type { AssetAuthArgs, AssetAuthChain, AssetAuthPolicy, AssetAuthProposal, AssetAuthVoteLockParams, AssetMarker, AssetTransferPayload, AuthScriptWitnessLegacyInput, AuthScriptWitnessNoAuthInput, AuthScriptWitnessPQInput, AuthScriptWitnessRefInput, AuthScriptWitnessVersion, AuthType, EncodeNullDataOptions, MultisigParams, Network, OrderUtxo, ParsedPartialFillOrder, ParsedPartialFillOrderPQ, PartialFillExpiration, PartialFillExpirationMode, PartialFillOrderPQParams, PartialFillOrderParams, SellerAddressKind, SellerScriptPubKey, SplitAssetWrappedResult, StrictWitnessECDSAInput, StrictWitnessPQInput, TxInputRef };

@@ -16,4 +16,7 @@ buildPartialFillScript, buildPartialFillScriptHex, buildFillScriptSig, buildFill
 buildPartialFillScriptPQ, buildPartialFillScriptPQHex, buildCancelScriptSigPQ, buildCancelScriptSigPQHex, parsePartialFillScriptPQ, isPartialFillScriptPQ, DEFAULT_PQ_TXHASH_SELECTOR, 
 // AuthScript (NoAuth) witness-stack variants — combine with
 // buildAuthScriptWitnessNoAuth to spend a committed covenant.
-buildFillWitnessStack, buildCancelWitnessStack, buildCancelWitnessStackPQ } from './covenants/index.js';
+buildFillWitnessStack, buildCancelWitnessStack, buildCancelWitnessStackPQ, 
+// P2AH custody (NIP-054 OP_CHECKASSETAUTH): policy witnessScript, the
+// custody args, the proposal hash votes carry and the vote lock template.
+ASSETAUTH_POLICY_VERSION, ASSETAUTH_MAX_ROLES, ASSETAUTH_CHAIN_IDS, buildAssetAuthPolicyScript, parseAssetAuthPolicyScript, buildAssetAuthArgs, buildAssetAuthProposalMessage, assetAuthProposalHash, buildAssetAuthVoteLockScript, buildAssetAuthVoteExecuteArgs, buildAssetAuthVoteReturnArgs } from './covenants/index.js';

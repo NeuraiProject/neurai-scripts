@@ -130,6 +130,10 @@ export const OP_CHECKSIG_ED25519 = 0xdd;
 // 0xde. Stack contract: (sig, count, pubkey -- count + 0|1). Works with
 // both legacy secp256k1 and PQ ML-DSA-44 keys via CPubKey::Verify().
 export const OP_CHECKSIGADD = 0xde;
+// NIP-054 (P2AH): M-of-N authorization by owner-token roles in slot 0xdf,
+// AuthScript only. Stack contract: (c a b T 1 M G role_1 .. role_n n -- 1),
+// failing the script instead of pushing 0. See covenants/asset-auth.
+export const OP_CHECKASSETAUTH = 0xdf;
 // ---------- Expansion / NOPs ----------
 // Only the NOPs not aliased by DePIN-Test opcodes are exported as NOPs.
 //   OP_NOP2 == OP_CHECKLOCKTIMEVERIFY (0xb1)
