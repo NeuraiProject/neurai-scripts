@@ -724,7 +724,7 @@ consumable; callers import directly from the package root.
 
 ## Version notes
 
-### Unreleased
+### 0.11.0
 
 - P2AH custody (NIP-054 `OP_CHECKASSETAUTH`, slot `0xdf`): `opcodes.OP_CHECKASSETAUTH`,
   `buildAssetAuthPolicyScript` / `parseAssetAuthPolicyScript`, `buildAssetAuthArgs`,
