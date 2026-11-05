@@ -1983,12 +1983,19 @@ function parseTransaction(hex) {
         for (let i = 0; i < voutCount; i += 1)
             outputs.push(readOutput(reader));
     }
-    // NIP-014: vrefin sits between vout and witness, v3 only (even when empty).
+    // NIP-014: reference inputs sit between vout and witness, announced by flag
+    // 0x02. Without the flag a version 3 transaction reads as 1.0.7 reads it.
     const vrefin = [];
-    if (version === 3) {
+    const hasRefInputs = (flags & 2) !== 0;
+    if (hasRefInputs) {
+        flags ^= 2;
         const refCount = reader.readCount(36, 'refinput');
         for (let i = 0; i < refCount; i += 1)
             vrefin.push(readOutpoint(reader));
+        if (vrefin.length === 0) {
+            // One encoding per transaction: the flag means some.
+            throw new Error('Superfluous reference inputs record (flag 0x02 with no reference inputs)');
+        }
     }
     if (flags & 1) {
         flags ^= 1;
@@ -2001,6 +2008,11 @@ function parseTransaction(hex) {
             }
             input.witness = stack;
         }
+        if (hasRefInputs && !inputs.some(inputHasWitness)) {
+            // With reference inputs the witness flag means some witness; 1.0.7 reads
+            // an empty witness record without them, and so does the node.
+            throw new Error('Superfluous witness record (flag 0x01 with no witness data)');
+        }
     }
     if (flags) {
         throw new Error(`Unknown transaction optional data (flags 0x${flags.toString(16)})`);
@@ -2010,6 +2022,9 @@ function parseTransaction(hex) {
         throw new Error(`Trailing bytes after transaction (offset ${reader.position})`);
     }
     return { version, inputs, outputs, vrefin, locktime };
+}
+function inputHasWitness(input) {
+    return (input.witness?.length ?? 0) > 0;
 }
 
 /**

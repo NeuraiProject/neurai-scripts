@@ -724,6 +724,16 @@ consumable; callers import directly from the package root.
 
 ## Version notes
 
+### 0.12.0
+
+- Requires `@neuraiproject/neurai-create-transaction` **0.10.0**, which follows the node's
+  NIP-014 encoding (Neurai DePIN-Test `d4ff4ef`, live on the testnet reset of 2026-11-05):
+  reference inputs are announced by flag `0x02` of the extended format, and a version 3
+  transaction without them has the plain layout. `assetAuthProposalHash` parses the
+  proposal's raw transaction with that codec; the proposal message itself is unchanged
+  (it already committed an empty reference list for a transaction without references).
+  Checked against a regtest node built from Neurai `7f1773e`.
+
 ### 0.11.0
 
 - P2AH custody (NIP-054 `OP_CHECKASSETAUTH`, slot `0xdf`): `opcodes.OP_CHECKASSETAUTH`,
