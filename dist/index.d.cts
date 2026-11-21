@@ -342,6 +342,7 @@ declare const OP_SHA512 = 203;
 declare const OP_CHECKSIG_ED25519 = 221;
 declare const OP_CHECKSIGADD = 222;
 declare const OP_CHECKASSETAUTH = 223;
+declare const OP_CHECKSIG_P256 = 224;
 declare const OP_NOP1 = 176;
 declare const OP_NOP9 = 184;
 declare const OP_NOP10 = 185;
@@ -465,6 +466,7 @@ declare const opcodes_d_OP_CHECKSIGADD: typeof OP_CHECKSIGADD;
 declare const opcodes_d_OP_CHECKSIGFROMSTACK: typeof OP_CHECKSIGFROMSTACK;
 declare const opcodes_d_OP_CHECKSIGVERIFY: typeof OP_CHECKSIGVERIFY;
 declare const opcodes_d_OP_CHECKSIG_ED25519: typeof OP_CHECKSIG_ED25519;
+declare const opcodes_d_OP_CHECKSIG_P256: typeof OP_CHECKSIG_P256;
 declare const opcodes_d_OP_CHECKTEMPLATEVERIFY: typeof OP_CHECKTEMPLATEVERIFY;
 declare const opcodes_d_OP_CODESEPARATOR: typeof OP_CODESEPARATOR;
 declare const opcodes_d_OP_DEPTH: typeof OP_DEPTH;
@@ -622,6 +624,7 @@ declare namespace opcodes_d {
     opcodes_d_OP_CHECKSIGFROMSTACK as OP_CHECKSIGFROMSTACK,
     opcodes_d_OP_CHECKSIGVERIFY as OP_CHECKSIGVERIFY,
     opcodes_d_OP_CHECKSIG_ED25519 as OP_CHECKSIG_ED25519,
+    opcodes_d_OP_CHECKSIG_P256 as OP_CHECKSIG_P256,
     opcodes_d_OP_CHECKTEMPLATEVERIFY as OP_CHECKTEMPLATEVERIFY,
     opcodes_d_OP_CODESEPARATOR as OP_CODESEPARATOR,
     opcodes_d_OP_DEPTH as OP_DEPTH,

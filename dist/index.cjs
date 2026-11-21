@@ -191,6 +191,8 @@ const OP_CHECKSIGADD = 0xde;
 // AuthScript only. Stack contract: (c a b T 1 M G role_1 .. role_n n -- 1),
 // failing the script instead of pushing 0. See covenants/asset-auth.
 const OP_CHECKASSETAUTH = 0xdf;
+// NIP-060: verify a compact P-256 signature over SHA-256(message).
+const OP_CHECKSIG_P256 = 0xe0;
 // ---------- Expansion / NOPs ----------
 // Only the NOPs not aliased by DePIN-Test opcodes are exported as NOPs.
 //   OP_NOP2 == OP_CHECKLOCKTIMEVERIFY (0xb1)
@@ -360,6 +362,7 @@ var opcodes = /*#__PURE__*/Object.freeze({
     OP_CHECKSIGFROMSTACK: OP_CHECKSIGFROMSTACK,
     OP_CHECKSIGVERIFY: OP_CHECKSIGVERIFY,
     OP_CHECKSIG_ED25519: OP_CHECKSIG_ED25519,
+    OP_CHECKSIG_P256: OP_CHECKSIG_P256,
     OP_CHECKTEMPLATEVERIFY: OP_CHECKTEMPLATEVERIFY,
     OP_CODESEPARATOR: OP_CODESEPARATOR,
     OP_DEPTH: OP_DEPTH,

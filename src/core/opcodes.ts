@@ -145,6 +145,8 @@ export const OP_CHECKSIGADD = 0xde;
 // AuthScript only. Stack contract: (c a b T 1 M G role_1 .. role_n n -- 1),
 // failing the script instead of pushing 0. See covenants/asset-auth.
 export const OP_CHECKASSETAUTH = 0xdf;
+// NIP-060: verify a compact P-256 signature over SHA-256(message).
+export const OP_CHECKSIG_P256 = 0xe0;
 
 // ---------- Expansion / NOPs ----------
 // Only the NOPs not aliased by DePIN-Test opcodes are exported as NOPs.
